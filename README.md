@@ -26,6 +26,7 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 | `tests/harness.lua` | A mock of the WoW API that runs several clients on a shared message bus with a virtual clock. Set `H.forever = true` to mock WoW: Forever (no combat log, secret values via `H.SECRET`). |
 | `tests/run.lua` | The test suite. |
 | `build.sh` | Packages `dist/Utu-<version>.zip` and `dist/release.json`, and turns the top of `CHANGELOG.md` into `dist/notes.md` and `Utu/WhatsNew.lua`. |
+| `AGENTS.md` | Repo conventions and common pitfalls, for contributors and coding agents (`CLAUDE.md` points to it). |
 | `CHANGELOG.md` | What changed in each version, for players. The one source for release notes, WowUp's changelog and the in-game "What's new". |
 
 Run the tests with Lua 5.1:
@@ -47,13 +48,15 @@ WoW: Forever runs on the Midnight engine: no combat log for addons, and some uni
 
 ### Releasing
 
+Changes go straight to `main`; there's no PR flow or release bot yet. To ship:
+
 1. Bump `## Version:` in `Utu/Utu.toc` and add a matching `## x.y.z` section at the top of `CHANGELOG.md`: short bullets written for players.
 2. Run `./build.sh`. It refuses to build if the changelog's top section isn't this version, and regenerates `Utu/WhatsNew.lua`; commit that with the release (the tests check it's current).
-3. Tag the commit to match the version and publish: `git tag v0.7.4 && git push --tags`, then `gh release create v0.7.4 dist/Utu-0.7.4.zip dist/release.json --notes-file dist/notes.md`.
+3. Push, then tag: `git tag -a v0.7.5 -m "Utu v0.7.5" && git push --tags`. CI runs the tests, builds, and publishes the GitHub release with the zip, `release.json`, and the changelog section as its notes. (If CI is unavailable, `gh release create v0.7.5 dist/Utu-0.7.5.zip dist/release.json --notes-file dist/notes.md` does the same; CI then just refreshes the files.)
 
-WowUp shows the release's notes as the changelog, but only the latest release's, so players skipping versions see the rest in game: the first login on a new version prints what changed since the last one they ran (`/utu news` repeats it).
+WowUp only offers a release to a Forever install if `release.json` lists the zip under the `forever` flavour, so always attach it. WowUp checks the five newest releases and shows the newest one's notes as the changelog. Players who skip versions see the rest in game: the first login on a new version prints what changed since the last one they ran (`/utu news` repeats it).
 
-WowUp only offers a release to a Forever install if `release.json` lists the zip under the `forever` flavour, so always attach it. WowUp checks the five newest releases.
+Conventions for working on the code (sync protocol compatibility, Forever API quirks, migrations, UI text, validation) are in [AGENTS.md](AGENTS.md).
 
 ## Licence
 
