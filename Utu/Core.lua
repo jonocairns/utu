@@ -384,6 +384,30 @@ function KOS:MyRealm()
     return myRealm
 end
 
+-- WoW: Forever names can be two words, and its unit APIs hand the second
+-- word back as the realm: UnitName gives "Pi", "Target" for "Pi Target",
+-- which reads as "Pi-Target". Real Forever realm names have digits
+-- (CAMWOWAU1Realm2PvP), so on Forever a letters-only "realm" that isn't
+-- ours is the rest of the name.
+local foreverNames
+function KOS:ForeverNames()
+    if foreverNames == nil then
+        local iface = GetBuildInfo and select(4, GetBuildInfo())
+        foreverNames = issecretvalue ~= nil and type(iface) == "number" and iface >= 16000 and iface < 17000
+    end
+    return foreverNames
+end
+
+-- (name, realm) as the game gave them -> (name, realm), with a misread
+-- second word moved back into the name.
+function KOS:JoinSpacedName(n, r)
+    if not (n and r and r ~= "" and self:ForeverNames()) then return n, r end
+    local rr = strtrim(r)
+    if rr == "" or rr:find("[%d%p%c]") then return n, r end
+    if rr:gsub("%s", ""):lower() == (self:MyRealm() or ""):lower() then return n, r end
+    return strtrim(n) .. " " .. rr, nil
+end
+
 -- Returns key, fullName ("Name-Realm") or nil for invalid input.
 function KOS:Canonical(name)
     if type(name) ~= "string" then return nil end
@@ -391,6 +415,7 @@ function KOS:Canonical(name)
     if name == "" then return nil end
     local n, r = strsplit("-", name, 2)
     if not n then return nil end
+    n, r = self:JoinSpacedName(n, r)
     -- WoW: Forever allows names with spaces ("Mietta Grace"); classic names
     -- are one word of at most 12 letters (24 bytes in UTF-8)
     n = strtrim(n):gsub("%s+", " ")
@@ -486,11 +511,76 @@ function KOS:InitDB()
         list.kills = list.kills or {}
         list.struck = list.struck or {}
         list.deaths = list.deaths or {}
+        if self:ForeverNames() then self:RepairNames(list) end
         for _, T in pairs(list.targets) do
             T.votes = T.votes or {}
             self:Recalc(T)
         end
     end
+end
+
+-- Re-key a list's names with the current Canonical, e.g. "Pi-Target"
+-- saved before two-word Forever names were read right becomes
+-- "Pi Target-<realm>". Entries that land on an existing key are merged.
+-- Safe to run on every load: names already right are left alone.
+function KOS:RepairNames(list)
+    local function fix(name)
+        if type(name) ~= "string" then return name end
+        local _, full = self:Canonical(name)
+        return full or name
+    end
+    local function newer(a, b) return not a or (b and (b.t or 0) > (a.t or 0)) end
+
+    local targets = {}
+    for key, T in pairs(list.targets) do
+        local nkey = self:Canonical(T.n) or key
+        T.n = fix(T.n)
+        local votes = {}
+        for vk, v in pairs(T.votes or {}) do
+            local rk = self:Canonical(v.by) or vk
+            v.by = fix(v.by)
+            if newer(votes[rk], v) then votes[rk] = v end
+        end
+        T.votes = votes
+        local cur = targets[nkey]
+        if not cur then
+            targets[nkey] = T
+        else
+            for vk, v in pairs(T.votes) do
+                if newer(cur.votes[vk], v) then cur.votes[vk] = v end
+            end
+            if T.cleared and newer(cur.cleared, T.cleared) then cur.cleared = T.cleared end
+            for k, v in pairs(T) do
+                if cur[k] == nil and type(v) ~= "table" then cur[k] = v end
+            end
+        end
+    end
+    list.targets = targets
+
+    local deaths = {}
+    for id, d in pairs(list.deaths) do
+        d.victim, d.killer = fix(d.victim), fix(d.killer)
+        local nid = self.DeathId(d)
+        if not deaths[nid] then deaths[nid] = d end
+    end
+    list.deaths = deaths
+
+    local kills = {}
+    for id, k in pairs(list.kills) do
+        k.target, k.by, k.rev, k.res = fix(k.target), fix(k.by), fix(k.rev), fix(k.res)
+        local nid = self.KillId(k)
+        local cur = kills[nid]
+        if not cur or (tonumber(k.v) or 0) < (tonumber(cur.v) or 0) then kills[nid] = k end
+    end
+    list.kills = kills
+
+    local struck = {}
+    for id, x in pairs(list.struck) do
+        local by, target, t = strsplit("|", id)
+        local nid = (t and (self:Canonical(by) or by) .. "|" .. (self:Canonical(target) or target) .. "|" .. t) or id
+        struck[nid] = struck[nid] or x
+    end
+    list.struck = struck
 end
 
 -- Which list is in use: one per guild, or a personal list when unguilded.

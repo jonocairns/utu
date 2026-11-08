@@ -88,6 +88,7 @@ function KOS:UnitInfo(unit)
     if not isPlayer then return nil end
     local n, r = try(UnitName, unit)
     if not n or n == "" or n == UNKNOWNOBJECT then return nil end
+    n, r = KOS:JoinSpacedName(n, r) -- Forever: "Pi", "Target" is "Pi Target"
     local full = (r and r ~= "") and (n .. "-" .. r) or n
     local info = { player = true, full = full }
     info.guid = try(UnitGUID, unit)

@@ -1300,5 +1300,49 @@ test("a guildie on a newer version tells you once when you log in", function()
     eq(a.KOS.Sync.versionNum("1.0"), nil)
 end)
 
+test("forever: two-word names the game splits into name and realm are put back together", function()
+    H.forever = true
+    -- saved by an earlier version: "Pi Target" stored as Pi-Target, plus a
+    -- correct mark for the same player and a gank by Sqwert Sqwert
+    local old = { lists = { ["Gankbusters-Forever"] = {
+        targets = {
+            ["pi-target"] = { n = "Pi-Target", guid = "Player-1-0P1", class = "ROGUE", guild = "Washed IRL", w = 1, on = true,
+                votes = { ["dangley-forever"] = { by = "Dangley-Forever", note = "", t = math.floor(H.serverTime) - 100 } } },
+            ["pi target-forever"] = { n = "Pi Target-Forever", w = 1, on = true,
+                votes = { ["bob-forever"] = { by = "Bob-Forever", note = "camps", t = math.floor(H.serverTime) - 50 } } },
+            ["kind eyes-camwowau1realm2pvp"] = { n = "kind eyes-CAMWOWAU1Realm2PvP", w = 1, on = true,
+                votes = { ["bob-forever"] = { by = "Bob-Forever", note = "", t = math.floor(H.serverTime) - 50 } } },
+        },
+        deaths = { ["dangley-forever|sqwert-sqwert|" .. (math.floor(H.serverTime) - 60)] =
+            { victim = "Dangley-Forever", killer = "Sqwert-Sqwert", t = math.floor(H.serverTime) - 60, zone = "" } },
+        kills = {}, struck = {},
+    } } }
+    local a = H.newClient("Alice", { db = old })
+    H.advance(20)
+    local K = a.KOS
+    local T = K:Lookup("pi target-forever")
+    assert(T, "repaired key")
+    eq(K:Lookup("pi-target"), nil, "old key gone")
+    eq(T.n, "Pi Target-Forever")
+    assert(T.votes["dangley-forever"] and T.votes["bob-forever"], "marks merged")
+    eq(T.guid, "Player-1-0P1"); eq(T.class, "ROGUE")
+    eq(#K:GanksBy("sqwert sqwert-forever"), 1, "gank re-keyed")
+    assert(K:Lookup("kind eyes-camwowau1realm2pvp"), "a realm with digits is a realm")
+    eq(K:Canonical("Gankdude-Forever"), "gankdude-forever", "our own realm stays a realm")
+    eq(select(2, K:Canonical("Fourty-Shots")), "Fourty Shots-Forever")
+
+    -- clicking a player: the game hands back ("Fourty", "Shots")
+    a.units.target = { name = "Fourty", realm = "Shots", guid = "Player-1-0F1", level = 36 }
+    eq(K:UnitInfo("target").full, "Fourty Shots")
+    K:Mark(K:UnitInfo("target").full, "")
+    assert(K:Lookup("fourty shots-forever"), "marked under the whole name")
+
+    -- an older guildie still sends the split form
+    local b = H.newClient("Bob")
+    H.advance(20)
+    H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, "S\tv\tSqwert-Sqwert\tBob-Forever\t" .. math.floor(H.serverTime) .. "\t0\t\t\t", "GUILD", "Bob-Forever")
+    assert(K:Lookup("sqwert sqwert-forever"), "incoming split name stored whole")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
