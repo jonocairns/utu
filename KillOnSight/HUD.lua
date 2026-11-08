@@ -316,6 +316,69 @@ function KOS:OnResponder(who, yards, forOthers)
 end
 
 ------------------------------------------------------------------------
+-- Death prompt: without a combat log we can't tell who landed the killing
+-- blow, so after you die we list the enemy players who were on you and
+-- you pick. That records the gank for the guild and marks them.
+------------------------------------------------------------------------
+
+local deathPrompt
+local function buildDeathPrompt()
+    deathPrompt = makeToast("KillOnSightDeath", -220)
+    deathPrompt:SetSize(460, 64)
+    deathPrompt:EnableMouse(true)
+    deathPrompt.icon:SetVertexColor(1, 0.3, 0.2)
+    deathPrompt.text:ClearAllPoints()
+    deathPrompt.text:SetPoint("TOPLEFT", deathPrompt.icon, "TOPRIGHT", 8, 8)
+    deathPrompt.text:SetPoint("RIGHT", -10, 0)
+    deathPrompt.buttons = {}
+    for i = 1, 3 do
+        local b = CreateFrame("Button", nil, deathPrompt, "UIPanelButtonTemplate")
+        b:SetSize(120, 22)
+        b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 124, 8)
+        b:SetScript("OnClick", function(self)
+            KOS:ConfirmKiller(self.cand, deathPrompt.at, deathPrompt.zone)
+            deathPrompt:Hide()
+        end)
+        b:SetScript("OnEnter", function(self)
+            local c = self.cand
+            if not c then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(KOS:Display(c.full))
+            if c.level then GameTooltip:AddLine("Level " .. c.level, 1, 1, 1) end
+            if c.T then GameTooltip:AddLine("Already on the list: " .. KOS:BountyTag(c.T), 1, 1, 1) end
+            if c.why then GameTooltip:AddLine("From the " .. c.why, 0.6, 0.6, 0.6) end
+            GameTooltip:AddLine("Records the gank for your guild" .. (KOS.S.autoMark and " and marks them." or "."), 0.6, 0.6, 0.6, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        deathPrompt.buttons[i] = b
+    end
+    local none = CreateFrame("Button", nil, deathPrompt, "UIPanelButtonTemplate")
+    none:SetSize(70, 22)
+    none:SetPoint("BOTTOMRIGHT", -8, 8)
+    none:SetText("None")
+    none:SetScript("OnClick", function() deathPrompt:Hide() end)
+end
+
+function KOS:ShowDeathPrompt(cands, at, zone)
+    if not deathPrompt then buildDeathPrompt() end
+    deathPrompt.at, deathPrompt.zone = at, zone
+    for i, b in ipairs(deathPrompt.buttons) do
+        local c = cands[i]
+        b.cand = c
+        if c then
+            local label = self:Display(c.full)
+            if #label > 14 then label = self.Utf8Truncate(label, 13) .. "..." end
+            b:SetText(label .. (c.level and (" " .. c.level) or ""))
+            b:Show()
+        else
+            b:Hide()
+        end
+    end
+    deathPrompt:Pop("|cffff6060Killed by an enemy player?|r Pick who it was:", 120)
+end
+
+------------------------------------------------------------------------
 -- Minimap button (drag around the rim; left = list, right = settings)
 ------------------------------------------------------------------------
 

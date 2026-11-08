@@ -4,7 +4,16 @@
 
 local H = {}
 local ADDON_DIR = (arg and arg[0] and arg[0]:match("^(.*)/tests/") or ".") .. "/KillOnSight/"
-local FILES = { "Core.lua", "Sync.lua", "Detect.lua", "HUD.lua", "Options.lua", "UI.lua" }
+-- load order comes from the .toc, like the game
+local FILES = {}
+for line in io.lines(ADDON_DIR .. "KillOnSight.toc") do
+    local f = line:match("^([%w_]+%.lua)%s*$")
+    if f then FILES[#FILES + 1] = f end
+end
+
+-- Forever mode (H.forever = true before newClient): no combat log, secret
+-- values exist, and units can hide fields behind H.SECRET.
+H.SECRET = setmetatable({ __secret = true }, { __tostring = function() return "SECRET" end })
 
 ------------------------------------------------------------------------
 -- Virtual clock & timers
@@ -94,6 +103,8 @@ mockObject = function()
     o.GetPoint = function() return "CENTER", nil, "CENTER", 0, 0 end
     o.GetStringWidth = function() return 50 end
     o.HasFocus = function() return false end
+    o.GetVerticalScroll = function(self) return rawget(self, "vscroll") or 0 end
+    o.SetVerticalScroll = function(self, v) self.vscroll = v end
     return o
 end
 H.mockObject = mockObject
@@ -141,6 +152,8 @@ local base = {
     ACCEPT = "Accept", CANCEL = "Cancel", YES = "Yes", NO = "No",
     SOUNDKIT = { RAID_WARNING = 8959 },
     COMBATLOG_OBJECT_TYPE_PLAYER = 0x400,
+    COMBATLOG_HONORGAIN = "%s dies, honorable kill Rank: %s (Estimated Honor Points: %d)",
+    COMBATLOG_HONORGAIN_NO_RANK = "%s dies, honorable kill (Estimated Honor Points: %d)",
     ChatTypeInfo = { RAID_WARNING = { r = 1, g = 0.3, b = 0 } },
     RAID_CLASS_COLORS = { ROGUE = { r = 1, g = 0.96, b = 0.41 }, WARRIOR = { r = 0.78, g = 0.61, b = 0.43 } },
     GetRealmName = function() return "Forever" end,
@@ -166,7 +179,7 @@ local base = {
     Minimap = mockObject(),
     TargetFrame = mockObject(),
     pairs = pairs, ipairs = ipairs, next = next, select = select, type = type, tostring = tostring,
-    tonumber = tonumber, pcall = pcall, unpack = unpack, setmetatable = setmetatable, error = error,
+    tonumber = tonumber, pcall = pcall, xpcall = xpcall, unpack = unpack, setmetatable = setmetatable, error = error,
     string = string, table = table, math = math, print = print,
 }
 
@@ -253,7 +266,20 @@ function H.newClient(name, opts)
     end
     env.UnitClass = function(unit) local u = c.units[unit]; if u then return u.class, u.class end end
     env.UnitIsPlayer = function(unit) return unit == "player" or (c.units[unit] ~= nil) end
-    env.UnitIsUnit = function(a, b) return a == b end
+    env.UnitIsUnit = function(a, b)
+        -- "<unit>target" == "player": does that unit target me?
+        local base = a:match("^(.+)target$")
+        if base and b == "player" then local u = c.units[base]; return u ~= nil and u.targeting == "player" end
+        return a == b
+    end
+    env.UnitExists = function(unit) return unit == "player" or c.units[unit] ~= nil end
+    env.UnitFactionGroup = function(unit)
+        if unit == "player" then return "Alliance" end
+        local u = c.units[unit]
+        if u then return u.faction or "Horde" end
+    end
+    env.UnitHealth = function(unit) if unit == "player" then return c.health or 100 end end
+    env.GetBuildInfo = function() return "1.60.1", "70862", "Nov 1 2026", 16001 end
     env.UnitLevel = function(unit)
         if unit == "player" then return c.level or 60 end
         local u = c.units[unit]
@@ -263,7 +289,12 @@ function H.newClient(name, opts)
     env.SetRaidTarget = function(unit, i) c.marks = c.marks or {}; c.marks[unit] = i end
     env.C_NamePlate = { GetNamePlateForUnit = function(unit) if c.units[unit] then return c.plates[unit] end end }
     c.plates = setmetatable({}, { __index = function(t, k) local p = mockObject(); rawset(t, k, p); return p end })
-    env.CombatLogGetCurrentEventInfo = function() return unpack(c.cleu or {}) end
+    if H.forever then
+        env.issecretvalue = function(v) return type(v) == "table" and v.__secret == true end
+        env.C_DeathRecap = { GetRecapEvents = function() return c.recap end }
+    else
+        env.CombatLogGetCurrentEventInfo = function() return unpack(c.cleu or {}) end
+    end
 
     env.C_ChatInfo = {
         RegisterAddonMessagePrefix = function(p) c.prefix = p end,
@@ -334,6 +365,7 @@ function H.reset()
     H.resting, H.inGroup, H.inInstance = false, false, false
     H.party = {}
     H.combat = false
+    H.forever = false
     H.now = 1000
     H.serverTime = 1794096000 + 12 * 3600
 end

@@ -225,14 +225,16 @@ local function coords()
     return string.format(" (%d, %d)", x * 100, y * 100)
 end
 
+-- Returns true if the call went out.
 function Sync:CallForHelp(attackerFull)
-    if not KOS:IsGuildList() or not KOS:InWorld() or IsInRaid() then return end
+    if not KOS:IsGuildList() or not KOS:InWorld() or IsInRaid() then return false end
     local key = KOS:Canonical(attackerFull)
-    if lastHelp[key] and GetTime() - lastHelp[key] < 60 then return end
+    if not key or (lastHelp[key] and GetTime() - lastHelp[key] < 60) then return false end
     lastHelp[key] = GetTime()
     local map, x, y = KOS:MyPosition()
     enqueue(hi, join("A", attackerFull, (KOS.ZoneString and KOS.ZoneString() or (GetRealZoneText() or "")) .. coords(),
         tostring(map or ""), x and string.format("%.4f", x) or "", y and string.format("%.4f", y) or ""))
+    return true
 end
 
 function Sync:SendOnMyWay(attackerFull, victimFull, dist)
@@ -596,6 +598,8 @@ end)
 KOS:On("GUILD_ROSTER_UPDATE", function() Sync:RetryPending() end)
 
 KOS:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
+    -- inside instances chat can arrive as secret values; we only sync in the world
+    if KOS.IsSecret(prefix) or KOS.IsSecret(text) or KOS.IsSecret(channel) or KOS.IsSecret(sender) then return end
     if prefix ~= PREFIX or channel ~= "GUILD" then return end
     Sync:OnMessage(text, sender)
 end)

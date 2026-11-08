@@ -2,10 +2,15 @@
 ## Title: Kill on Sight
 ## Notes: Guild-shared kill-on-sight list with bounties, a hunter leaderboard and enemy-guild tracking.
 ## Author: jonoc
-## Version: 0.4.1
+## Version: 0.5.0
 ## SavedVariables: KillOnSightDB
+## IconTexture: Interface\TargetingFrame\UI-RaidTargetingIcon_8
+## AddonCompartmentFunc: KillOnSight_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: KillOnSight_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: KillOnSight_OnAddonCompartmentLeave
 
 Core.lua
+Caps.lua
 Sync.lua
 Detect.lua
 HUD.lua

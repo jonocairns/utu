@@ -104,6 +104,29 @@ function KOS:BuildSettings(parent)
     sub:SetPoint("TOPLEFT", COL1, -6)
     sub:SetText("These settings only affect you. Everything your guild does is always listed in the Activity tab.")
 
+    -- what this client allows (hover for details)
+    local client = CreateFrame("Frame", nil, parent)
+    client:SetPoint("TOPRIGHT", -12, -2)
+    client:SetSize(200, 18)
+    client:EnableMouse(true)
+    local clientText = client:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    clientText:SetPoint("RIGHT")
+    clientText:SetJustifyH("RIGHT")
+    client:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:AddLine("What this client allows")
+        for _, r in ipairs(KOS:CapsSummary()) do
+            GameTooltip:AddLine((r.ok and "|cff40ff40+|r " or "|cffff6060-|r ") .. r.text, 1, 1, 1, true)
+        end
+        GameTooltip:AddLine("Type /kos probe near an enemy player to test more.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    client:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    controls[#controls + 1] = { refresh = function()
+        clientText:SetText(KOS.caps.combatLog and "Client: full detection"
+            or "Client: no combat log |cff888888(hover)|r")
+    end }
+
     -- column 1: alerts
     local y = -28
     y = header("Alerts", COL1, y)
@@ -123,7 +146,7 @@ function KOS:BuildSettings(parent)
     y = y - 4
     y = header("Detect using", COL1, y)
     y = check("srcNameplate", "Nameplates", "The main long-range source. Turn on enemy nameplates (V).", COL1, y)
-    y = check("srcCombat", "Combat log", "Anyone fighting near you.", COL1, y)
+    y = check("srcCombat", "Combat log", "Anyone fighting near you. Not available on WoW: Forever.", COL1, y)
     y = check("srcTarget", "Targeting", nil, COL1, y)
     y = check("srcMouseover", "Mouseover", "Can be chatty in busy places.", COL1, y)
     y = check("guildAlerts", "Skull on members of KoS guilds", nil, COL1, y)
@@ -141,8 +164,8 @@ function KOS:BuildSettings(parent)
     y = check("raidMark", "Raid-mark KoS targets with a skull", "In raids this needs lead or assist.", COL2, y)
     y = y - 4
     y = header("Bounty game", COL2, y)
-    y = check("claimKills", "Claim bounties for my kills", "Share your killing blows on KoS players so they score.", COL2, y)
-    y = check("autoMark", "Auto-mark players who kill me", "Open world only. Being killed again refreshes your mark.", COL2, y)
+    y = check("claimKills", "Claim bounties for my kills", "Share your kills on KoS players so they score. Without a combat log, every guildie the game credits with the kill (honour) can claim it.", COL2, y)
+    y = check("autoMark", "Mark players who kill me", "Open world only. Being killed again refreshes your mark. Without a combat log you pick the killer from a short list after you die.", COL2, y)
     y = y - 4
     y = header("Guild & noise", COL2, y)
     y = stepper("chatter", "Guild activity in chat",
@@ -152,7 +175,7 @@ function KOS:BuildSettings(parent)
     y = stepper("helpRange", "\"Nearby\" means within",
         { { 200, "200 yd" }, { 400, "400 yd" }, { 800, "800 yd" }, { 1500, "1500 yd" } }, COL2, y)
     y = check("announce", "Tell guildies when I spot someone", "Hidden addon message: only guildies with Kill on Sight see it.", COL2, y)
-    y = check("callForHelp", "Call for help when a KoS player attacks me", "Guildies in your zone get a banner; killing your attacker within 3 minutes earns a rescue bonus.", COL2, y)
+    y = check("callForHelp", "Call for help when a KoS player attacks me", "Also anyone 5+ levels above you. Guildies nearby get a banner; killing your attacker within 3 minutes earns a rescue bonus. Call by hand with /kos sos or a key binding (Key Bindings > AddOns > Kill on Sight).", COL2, y)
     y = check("partyChat", "Post sightings in party/raid chat", "Visible to your group. Max one per player every 5 minutes.", COL2, y)
     y = check("guildChat", "Post sightings in guild chat", "Visible to everyone in the guild. Max one per player every 5 minutes.", COL2, y)
 

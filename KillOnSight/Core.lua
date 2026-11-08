@@ -388,15 +388,21 @@ function KOS:Canonical(name)
     name = strtrim(name)
     if name == "" then return nil end
     local n, r = strsplit("-", name, 2)
-    -- character names are at most 12 letters (24 bytes in UTF-8)
-    if not n or n == "" or #n > 24 or n:find("[%s%d%p]") then return nil end
+    if not n then return nil end
+    -- WoW: Forever allows names with spaces ("Mietta Grace"); classic names
+    -- are one word of at most 12 letters (24 bytes in UTF-8)
+    n = strtrim(n):gsub("%s+", " ")
+    local multi = n:find(" ", 1, true) ~= nil
+    if n == "" or #n > (multi and 36 or 24) or n:find("[%d%p%c]") then return nil end
     if r and #r > 40 then return nil end
     if r and r ~= "" then
         r = r:gsub("[%s%-']", "")
     else
         r = self:MyRealm()
     end
-    n = n:sub(1, 1):upper() .. n:sub(2):lower()
+    -- one-word names: "gankdude" -> "Gankdude". Multi-word names keep the
+    -- case they were given (the key is lowercase either way).
+    if not multi then n = n:sub(1, 1):upper() .. n:sub(2):lower() end
     local full = n .. "-" .. r
     return full:lower(), full
 end
@@ -409,13 +415,10 @@ function KOS:Display(full)
     return full
 end
 
+-- Name-Realm of a player unit, or nil (see KOS:UnitInfo in Caps.lua).
 function KOS:UnitFull(unit)
-    local n, r = UnitName(unit)
-    -- Forever (Midnight engine) can hide names as "secret" values; comparing one throws.
-    if issecretvalue and (issecretvalue(n) or issecretvalue(r)) then return nil end
-    if not n or n == "" or n == UNKNOWNOBJECT then return nil end
-    if r and r ~= "" then n = n .. "-" .. r end
-    return n
+    local info = self:UnitInfo(unit)
+    return info and info.full
 end
 
 local myName, myKey
@@ -599,10 +602,10 @@ function KOS:Lookup(key, guid)
 end
 
 function KOS:LookupUnit(unit)
-    if not UnitIsPlayer(unit) then return nil end
-    local key = self:Canonical(self:UnitFull(unit))
+    local info = self:UnitInfo(unit)
+    local key = info and self:Canonical(info.full)
     if not key then return nil end
-    return self:Lookup(key, UnitGUID(unit))
+    return self:Lookup(key, info.guid)
 end
 
 function KOS:ActiveVotes(T)
@@ -885,9 +888,13 @@ end
 function KOS:GanksBy(key) return ganksBy(key) end
 
 local killIndex -- targetKey -> claimed kills (not assists), oldest first
+-- Claims by different hunters within this many seconds on one target are
+-- the same kill (several guildies credited by honour): it drains the bounty once.
+KOS.KILL_CLUSTER = 30
+local drainIndex
 local function killsOn(key)
     if not killIndex then
-        killIndex = {}
+        killIndex, drainIndex = {}, {}
         for _, k in pairs(KOS:Kills()) do
             if not k.assist then
                 local tk = KOS:Canonical(k.target)
@@ -897,9 +904,29 @@ local function killsOn(key)
                 end
             end
         end
-        for _, l in pairs(killIndex) do table.sort(l, function(a, b) return a.t < b.t end) end
+        for tk, l in pairs(killIndex) do
+            table.sort(l, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.by < b.by end)
+            -- a claim joins the current kill if it's close in time and from a
+            -- different hunter; the same hunter twice is two kills
+            local d, start, hunters = {}, nil, nil
+            for _, k in ipairs(l) do
+                local hk = KOS:Canonical(k.by) or k.by
+                if start and k.t - start <= KOS.KILL_CLUSTER and not hunters[hk] then
+                    hunters[hk] = true
+                else
+                    d[#d + 1] = k
+                    start, hunters = k.t, { [hk] = true }
+                end
+            end
+            drainIndex[tk] = d
+        end
     end
     return killIndex[key] or {}
+end
+-- One entry per distinct kill of `key` (for the bounty drain).
+local function drainsOn(key)
+    killsOn(key)
+    return drainIndex[key] or {}
 end
 function KOS:KillsOn(key) return killsOn(key) end
 
@@ -931,7 +958,7 @@ function KOS:Score(T, excludeKey, at, upperBound)
         end
     end
     -- bounties get paid down by kills; they refill only if the target keeps ganking
-    for _, k in ipairs(killsOn(key)) do
+    for _, k in ipairs(drainsOn(key)) do
         if k.t > pardon and k.t < now then
             s = s - self.KILL_DRAIN * self:Decay(now - k.t)
         end
@@ -1330,6 +1357,7 @@ function KOS:CheckResponder(targetFull, killerFull)
     if not r then return end
     responding[key] = nil
     if GetTime() - r.at > self.RESCUE_WINDOW + 60 or self:Canonical(killerFull) == self:MyKey() then return end
+    if self:ClaimedRecently(key) then return end -- honour already credited me with the kill
     local dist = self:DistanceTo(r.map, r.x, r.y)
     if not dist or dist > self.RESPOND_RANGE then return end
     local T = self:Lookup(key)
@@ -1352,17 +1380,23 @@ function KOS:InWorld()
     return not inInstance
 end
 
-function KOS:RecordDeath(killerFull, zone)
+-- at: server time of the death (defaults to now; set when confirmed later)
+function KOS:RecordDeath(killerFull, zone, at)
     local key, full = self:Canonical(killerFull)
     if not key or self:ListKey() == nil or not self:InWorld() then return end
     if lastDeath[key] and GetTime() - lastDeath[key] < 30 then return end
     lastDeath[key] = GetTime()
-    local d = { victim = self:MyName(), killer = full, t = self:Now(), zone = self.CleanText(zone or "", 60) }
+    local now = self:Now()
+    local t = (at and at <= now and now - at < 600) and math.floor(at) or now
+    local d = { victim = self:MyName(), killer = full, t = t, zone = self.CleanText(zone or "", 60) }
     if self:MergeDeath(d) and ns.Sync then ns.Sync:BroadcastDeath(d) end
 end
 
 -- I got the killing blow on a KoS player (or a member of a KoS guild).
 local lastClaim = {}
+function KOS:ClaimedRecently(key)
+    return lastClaim[key] ~= nil and GetTime() - lastClaim[key] < self.KILL_CLUSTER
+end
 function KOS:ClaimKill(T, zone, targetLevel)
     if not self.S.claimKills or not self:InWorld() then return end
     local key = self:Canonical(T.n)
@@ -1563,10 +1597,9 @@ end
 
 -- Called whenever a player unit is visible. Records their guild for the
 -- KoS-guild check, and syncs it if they're marked and it changed.
-function KOS:ObserveUnit(unit, T)
-    if not UnitIsPlayer(unit) then return nil end
-    local g = GetGuildInfo(unit)
-    local guid = UnitGUID(unit)
+function KOS:ObserveUnit(info, T)
+    if not info then return nil end
+    local g, guid = info.guild, info.guid
     if guid then
         if guidGuild[guid] == nil then
             guidGuildSize = guidGuildSize + 1
@@ -1650,18 +1683,20 @@ function KOS:VirtualTarget(full, guid, class, g)
 end
 
 -- Marked player, or an unmarked member of a KoS guild, for a visible unit.
-function KOS:ResolveUnit(unit)
-    if not UnitIsPlayer(unit) or UnitIsUnit(unit, "player") then return nil end
-    local full = self:UnitFull(unit)
+-- Also returns the unit's info (see KOS:UnitInfo) as the 5th value.
+-- info: the unit's info if the caller already read it.
+function KOS:ResolveUnit(unit, info)
+    info = info or self:UnitInfo(unit)
+    if not info then return nil end
+    local full = info.full
     local unitKey = self:Canonical(full)
-    if not unitKey then return nil end
-    local guid = UnitGUID(unit)
+    if not unitKey or unitKey == self:MyKey() then return nil end
+    local guid = info.guid
     local T, key = self:Lookup(unitKey, guid)
-    local g = self:ObserveUnit(unit, T)
-    if T then return T, key, full, unitKey end
+    local g = self:ObserveUnit(info, T)
+    if T then return T, key, full, unitKey, info end
     if self.S.guildAlerts and self:IsKosGuild(g) then
-        local _, class = UnitClass(unit)
-        return self:VirtualTarget(select(2, self:Canonical(full)), guid, class, g), unitKey, full, unitKey
+        return self:VirtualTarget(select(2, self:Canonical(full)), guid, info.class, g), unitKey, full, unitKey, info
     end
 end
 
@@ -1773,13 +1808,12 @@ StaticPopupDialogs["KILLONSIGHT_SEASON"] = {
 }
 
 function KOS:AddTarget(note)
-    if not UnitIsPlayer("target") then self:Print("Target a player first."); return end
-    local _, class = UnitClass("target")
-    local full = self:UnitFull("target")
+    local info = self:UnitInfo("target")
+    if not info then self:Print("Target a player first."); return end
     if note and note ~= "" then
-        self:Mark(full, note, UnitGUID("target"), class)
+        self:Mark(info.full, note, info.guid, info.class)
     else
-        self:PromptNote(full, UnitGUID("target"), class)
+        self:PromptNote(info.full, info.guid, info.class)
     end
 end
 
@@ -1881,12 +1915,13 @@ local function setupMenus()
     }
     for _, tag in ipairs(tags) do
         pcall(Menu.ModifyMenu, tag, function(owner, root, ctx)
-            if not ctx or not ctx.name then return end
+            if not ctx or not ctx.name or KOS.IsSecret(ctx.name) or KOS.IsSecret(ctx.server) then return end
             local name = ctx.name
             if ctx.server and ctx.server ~= "" and not name:find("-", 1, true) then name = name .. "-" .. ctx.server end
             local key = KOS:Canonical(name)
             if not key or key == KOS:MyKey() then return end
-            local guid, class = ctx.unit and UnitGUID(ctx.unit), ctx.unit and select(2, UnitClass(ctx.unit))
+            local info = ctx.unit and KOS:UnitInfo(ctx.unit)
+            local guid, class = info and info.guid, info and info.class
             local T = KOS:GetTarget(key)
             root:CreateDivider()
             root:CreateTitle("Kill on Sight" .. ((T and T.on) and (" - " .. KOS:BountyTag(T)) or ""))
@@ -1914,7 +1949,7 @@ local HELP = {
     "/kos - open the list",
     "/kos add - mark your current target (asks for a note)",
     "/kos target [note] - mark your current target with a note",
-    "/kos add Name [note] - mark a player by name",
+    "/kos add Name [note] - mark a player by name (use quotes for names with spaces)",
     "/kos rm [Name] - remove your mark",
     "/kos pardon Name - clear everyone's marks (officers)",
     "/kos list [filter] - print the list",
@@ -1925,6 +1960,8 @@ local HELP = {
     "/kos strike N - void claim number N from the last /kos claims (officers)",
     "/kos config - open settings",
     "/kos sync - sync with online guildies now",
+    "/kos sos - call nearby guildies for help against your target or attacker",
+    "/kos probe - test what this client allows (saved for troubleshooting)",
     "/kos test - show a test alert",
 }
 
@@ -1936,17 +1973,19 @@ local function onSlash(msg)
     if cmd == "" or cmd == "show" then
         KOS:ToggleUI()
     elseif cmd == "add" or cmd == "mark" then
-        local name, note = rest:match("^(%S+)%s*(.-)$")
+        -- names with spaces go in quotes: /kos add "kind eyes" camps the flight path
+        local name, note = rest:match('^"(.-)"%s*(.-)$')
+        if not name then name, note = rest:match("^(%S+)%s*(.-)$") end
         if not name then KOS:AddTarget()
         elseif note ~= "" then KOS:Mark(name, note)
         else KOS:PromptNote(name) end
     elseif cmd == "target" or cmd == "t" then
         KOS:AddTarget(rest)
     elseif cmd == "rm" or cmd == "remove" or cmd == "unmark" then
-        if rest == "" and UnitIsPlayer("target") then rest = KOS:UnitFull("target") end
+        if rest == "" then rest = KOS:UnitFull("target") or "" end
         KOS:Unmark(rest)
     elseif cmd == "pardon" then
-        if rest == "" and UnitIsPlayer("target") then rest = KOS:UnitFull("target") end
+        if rest == "" then rest = KOS:UnitFull("target") or "" end
         KOS:Pardon(rest)
     elseif cmd == "list" then
         local filter = rest:lower()
@@ -2005,6 +2044,10 @@ local function onSlash(msg)
         KOS:OpenSettings()
     elseif cmd == "sync" then
         if ns.Sync then ns.Sync:Hello(true) end
+    elseif cmd == "probe" then
+        KOS:Probe()
+    elseif cmd == "sos" then
+        KOS:ManualHelp()
     elseif cmd == "test" then
         local me = KOS:MyName()
         KOS:Alert("test-test", {
@@ -2051,17 +2094,63 @@ local frame = CreateFrame("Frame")
 KOS.frame = frame
 local handlers = {}
 
+-- Returns false if the client refused the event.
 function KOS:On(event, fn)
     handlers[event] = handlers[event] or {}
     table.insert(handlers[event], fn)
-    pcall(frame.RegisterEvent, frame, event) -- some events may be restricted on some clients
+    local ok = pcall(frame.RegisterEvent, frame, event) -- some events are restricted on some clients
+    if not ok then
+        self.blockedEvents = self.blockedEvents or {}
+        self.blockedEvents[event] = true
+    end
+    return ok
 end
 
-frame:SetScript("OnEvent", function(_, event, ...)
+-- Each handler runs protected: an error is saved to KillOnSightDB.diag and
+-- passed on to the normal error handler, and the other handlers still run.
+local current, args, nargs = nil, {}, 0
+local function runCurrent() return current(unpack(args, 1, nargs)) end
+local function onError(err)
+    if KOS.RecordError then KOS:RecordError(current and "event" or "?", err) end
+    return err
+end
+local function dispatch(event, ...)
     local list = handlers[event]
     if not list or (not KOS.db and event ~= "ADDON_LOADED") then return end
-    for i = 1, #list do list[i](...) end
-end)
+    if KOS.CountEvent then KOS:CountEvent(event) end
+    nargs = select("#", ...)
+    for i = 1, nargs do args[i] = select(i, ...) end
+    for i = 1, #list do
+        current = list[i]
+        local ok, err = xpcall(runCurrent, onError)
+        if not ok then
+            local handler = geterrorhandler and geterrorhandler()
+            if handler then handler(err) else error(err, 0) end
+        end
+    end
+    current = nil
+end
+frame:SetScript("OnEvent", function(_, event, ...) dispatch(event, ...) end)
+
+-- Key bindings (Bindings.xml) and the addon compartment (the addons
+-- dropdown by the minimap) call these globals.
+BINDING_HEADER_KILLONSIGHT = "Kill on Sight"
+BINDING_NAME_KILLONSIGHT_TOGGLE = "Open Kill on Sight"
+BINDING_NAME_KILLONSIGHT_HELP = "Call guildies for help"
+function KillOnSight_Toggle() if KOS.db then KOS:ToggleUI() end end
+function KillOnSight_Help() if KOS.db then KOS:ManualHelp() end end
+function KillOnSight_OnAddonCompartmentClick(_, button)
+    if not KOS.db then return end
+    if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
+end
+function KillOnSight_OnAddonCompartmentEnter(_, frame)
+    if not GameTooltip or not frame then return end
+    GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
+    GameTooltip:AddLine("Kill on Sight")
+    GameTooltip:AddLine("Left-click: open the list. Right-click: settings.", 1, 1, 1)
+    GameTooltip:Show()
+end
+function KillOnSight_OnAddonCompartmentLeave() if GameTooltip then GameTooltip:Hide() end end
 
 KOS:On("ADDON_LOADED", function(name)
     if name ~= ADDON then return end

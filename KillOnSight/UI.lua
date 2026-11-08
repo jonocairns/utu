@@ -149,7 +149,11 @@ local function List(parent, x, y, w, h, rowH, build, fill, onClick)
         for i = #items + 1, #self.rows do self.rows[i]:Hide() end
         content:SetHeight(math.max(1, #items * rowH))
         self.empty:SetShown(#items == 0)
+        -- a shorter list (e.g. after searching) mustn't leave us scrolled past its end
+        local maxScroll = math.max(0, #items * rowH - h)
+        if scroll:GetVerticalScroll() > maxScroll then scroll:SetVerticalScroll(maxScroll) end
     end
+    function L:ScrollToTop() scroll:SetVerticalScroll(0) end
     return L
 end
 
@@ -210,10 +214,10 @@ local function markFromForm()
     local name = strtrim(wanted.name:GetText() or "")
     local note = wanted.note:GetText() or ""
     if name == "" then
-        if not UnitIsPlayer("target") then KOS:Print("Type a name, or target a player."); return end
-        local _, class = UnitClass("target")
-        KOS:Mark(KOS:UnitFull("target"), note, UnitGUID("target"), class)
-        sel.wanted = KOS:Canonical(KOS:UnitFull("target"))
+        local info = KOS:UnitInfo("target")
+        if not info then KOS:Print("Type a name, or target a player."); return end
+        KOS:Mark(info.full, note, info.guid, info.class)
+        sel.wanted = KOS:Canonical(info.full)
     else
         KOS:Mark(name, note)
         sel.wanted = KOS:Canonical(name)
@@ -243,8 +247,10 @@ local function buildWanted()
     wanted.search:SetPoint("TOPLEFT", 20, -32)
     wanted.search:SetScript("OnTextChanged", function(self)
         self.ph:SetShown(self:GetText() == "")
+        if wanted.list then wanted.list:ScrollToTop() end
         KOS:RefreshUI()
     end)
+    wanted.search:SetScript("OnEnterPressed", wanted.search.ClearFocus)
     wanted.count = Text(p, "GameFontDisableSmall", "RIGHT")
     wanted.count:SetPoint("TOPRIGHT", p, "TOPLEFT", LIST_W, -36)
 
@@ -303,8 +309,10 @@ local function buildWanted()
     d.placeholder:SetText("Select a player to see their bounty,\nmarks and history.")
 end
 
+function KOS.WantedWidgets() return wanted end -- for tests
+
 local function refreshWanted()
-    local filter = (wanted.search:GetText() or ""):lower()
+    local filter = strtrim(wanted.search:GetText() or ""):lower()
     local items = {}
     for _, T in pairs(KOS:Targets()) do
         if T.on then
@@ -322,6 +330,8 @@ local function refreshWanted()
     end)
     wanted.list:Update(items, function(T) return KOS:Canonical(T.n) == sel.wanted end)
     wanted.count:SetText(#items .. (#items == 1 and " player" or " players"))
+    wanted.list.empty:SetText(filter ~= "" and ("No one matches \"" .. filter .. "\".")
+        or "Nobody on the list yet.\nType a name above, or target a player and click Mark.")
 
     local d, T = wanted.d, selectedTarget()
     local show = T ~= nil

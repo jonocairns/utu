@@ -70,7 +70,10 @@ test("name canonicalisation", function()
     eq(key, "gankdude-forever"); eq(full, "Gankdude-Forever")
     key, full = K:Canonical("BOB-Other Realm")
     eq(key, "bob-otherrealm"); eq(full, "Bob-OtherRealm")
-    eq(K:Canonical("two words"), nil)
+    key, full = K:Canonical("  Mietta   Grace ")
+    eq(key, "mietta grace-forever"); eq(full, "Mietta Grace-Forever") -- Forever allows spaces
+    eq(K:Canonical("kind eyes"), "kind eyes-forever")
+    eq(K:Canonical("Ab.cd"), nil)
     eq(K:Canonical("x1"), nil)
     eq(K:Display("Gankdude-Forever"), "Gankdude")
 end)
@@ -926,6 +929,199 @@ test("data persists across relog; 0.1 data migrates", function()
     a.KOS:Mark("Second", "persist me")
     a = H.relogin(a)
     eq(a.KOS:Lookup("second-forever").votes["alice-forever"].note, "persist me")
+end)
+
+
+------------------------------------------------------------------------
+-- WoW: Forever (no combat log, secret values)
+------------------------------------------------------------------------
+
+local function honor(c, victim)
+    H.fire(c, "CHAT_MSG_COMBAT_HONOR_GAIN", victim .. " dies, honorable kill Rank: Scout (Estimated Honor Points: 12)")
+end
+
+test("forever: no combat log, caps say so, nothing errors", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    eq(a.KOS.caps.combatLog, false)
+    eq(a.KOS.caps.secrets, true)
+    eq(a.KOS.frame.events.COMBAT_LOG_EVENT_UNFILTERED, nil, "never registers the combat log")
+    a.KOS:ShowUI("settings")
+    for _, tab in ipairs({ "wanted", "hunters", "guilds", "activity", "settings" }) do a.KOS:SetTab(tab) end
+    eq(#a.KOS:CapsSummary(), 3)
+end)
+
+test("forever: secret names are skipped, readable ones still alert", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:Mark("Gankdude", ""); b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    a.units.nameplate1 = { name = H.SECRET, guid = H.SECRET, level = H.SECRET }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(1)
+    eq(#a.raidWarnings, 0)
+    eq(a.KOS:UnitInfo("nameplate1"), nil)
+    a.units.nameplate2 = { name = "Gankdude", guid = "Player-1-0001", level = 60, guild = H.SECRET }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.advance(1)
+    eq(#a.raidWarnings, 1, "a readable name still alerts even if the guild is secret")
+end)
+
+test("forever: honour kills pay every credited guildie; the bounty drains once", function()
+    H.forever = true
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    H.advance(20)
+    c.KOS:Mark("Gankdude", "")
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    local before = c.KOS:Score(T_(c, "Gankdude"))
+    eq(a.KOS.HonorVictim("Gankdude dies, honorable kill Rank: Scout (Estimated Honor Points: 12)"), "Gankdude")
+    honor(a, "Gankdude")
+    honor(b, "Gankdude")
+    H.advance(2)
+    assert(points(c, "Alice") > 0, "Alice credited")
+    assert(points(c, "Bob") > 0, "Bob credited")
+    H.advance(31, 1)
+    local after = c.KOS:Score(T_(c, "Gankdude"))
+    assert(math.abs((before - after) - 50) < 1, "one drain for one kill: " .. before .. " -> " .. after)
+    honor(a, "Randomguy")
+    H.advance(1)
+    eq(#a.KOS:Claims("Alice"), 1, "unmarked players pay nothing")
+end)
+
+test("forever: who killed me comes from a prompt; confirming records the gank and marks", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local shown
+    local orig = a.KOS.ShowDeathPrompt
+    a.KOS.ShowDeathPrompt = function(self, cands, at, zone) shown = { cands = cands, at = at, zone = zone }; orig(self, cands, at, zone) end
+    a.units.nameplate4 = { name = "Gankdude", guid = "Player-1-0009", level = 60, targeting = "player" }
+    a.units.nameplate5 = { name = "Friendly", guid = "Player-1-0010", level = 60, faction = "Alliance", targeting = "player" }
+    a.units.nameplate6 = { name = "Bystander", guid = "Player-1-0011", level = 60 }
+    for i = 4, 6 do H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate" .. i) end
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    a.health = 50; H.fire(a, "UNIT_HEALTH", "player")
+    H.advance(1)
+    H.fire(a, "PLAYER_DEAD")
+    assert(shown, "prompt shown")
+    eq(#shown.cands, 1, "only the hostile player targeting me")
+    eq(shown.cands[1].full, "Gankdude-Forever")
+    eq(#b.KOS:Deaths() == nil and 0 or 0, 0)
+    a.KOS:ConfirmKiller(shown.cands[1], shown.at, shown.zone)
+    H.advance(2)
+    local T = b.KOS:Lookup("gankdude-forever")
+    assert(T, "marked and synced")
+    eq(#b.KOS:GanksBy("gankdude-forever"), 1, "the gank reached Bob")
+end)
+
+test("forever: the death recap's killer is offered first", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    local shown
+    a.KOS.ShowDeathPrompt = function(_, cands) shown = cands end
+    a.recap = {
+        { timestamp = 10, sourceName = "Earlier", sourceGUID = "Player-1-0020" },
+        { timestamp = 12, sourceName = "Recapper", sourceGUID = "Player-1-0021" },
+    }
+    H.fire(a, "PLAYER_DEAD")
+    assert(shown and shown[1].full == "Recapper-Forever" and shown[1].why == "death recap", "recap killer first")
+    shown = nil
+    H.fire(a, "PLAYER_DEAD")
+    eq(shown, nil, "the same recap isn't reused for the next death")
+    a.recap = { { timestamp = 20, sourceName = "Murloc", sourceGUID = "Creature-0-1" } }
+    H.fire(a, "PLAYER_DEAD")
+    eq(shown, nil, "a mob finishing you off isn't offered")
+end)
+
+test("forever: KoS player targeting me while I take damage calls for help; /kos sos too", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    b.KOS:Mark("Gankdude", ""); a.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    a.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001", level = 60, targeting = "player" }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    a.health = 80; H.fire(a, "UNIT_HEALTH", "player")
+    a.health = 60; H.fire(a, "UNIT_HEALTH", "player")
+    H.advance(2)
+    local function helped(cl) for _, w in ipairs(cl.raidWarnings) do if w:find("HELP!") then return true end end end
+    assert(helped(b), "Bob got the help call")
+    -- manual call against an unmarked target
+    a.units.target = { name = "Somebody", guid = "Player-1-0005", level = 30 }
+    H.slash(a, "sos")
+    H.advance(2)
+    assert(feedHas(b, "Somebody"), "manual help call reached Bob")
+end)
+
+test("forever: /kos probe saves results; secret fields show as SECRET", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.units.target = { name = H.SECRET, guid = "Player-1-0001", level = 60 }
+    H.slash(a, "probe")
+    local p = a.db.probe
+    assert(p, "probe saved")
+    eq(p.client.toc, 16001)
+    eq(p.target.name, "SECRET")
+    eq(p.caps.combatLog, false)
+    assert(p.events.ADDON_LOADED, "event counts saved")
+end)
+
+test("handler errors are saved for troubleshooting and don't stop other handlers", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    local caught, ran = {}, false
+    a.env.geterrorhandler = function() return function(e) caught[#caught + 1] = e end end
+    a.KOS:On("KOS_TEST_EVENT", function() error("boom") end)
+    a.KOS:On("KOS_TEST_EVENT", function() ran = true end)
+    H.fire(a, "KOS_TEST_EVENT")
+    H.fire(a, "KOS_TEST_EVENT")
+    assert(ran, "second handler still ran")
+    eq(#caught, 2, "passed on to the normal error handler")
+    local e = a.db.diag.errors
+    eq(#e, 1, "repeats are counted, not duplicated")
+    assert(e[1].msg:find("boom") and e[1].n == 2, e[1].msg)
+end)
+
+test("names with spaces (Forever) can be marked, synced and seen", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:Mark("Kind Eyes", "camps the flight path")
+    b.KOS:Mark("kind eyes", "")
+    H.advance(2)
+    eq(weight(b, "Kind Eyes"), 2)
+    H.slash(a, 'add "Mietta Grace" rude')
+    H.advance(2)
+    assert(b.KOS:Lookup("mietta grace-forever"), "quoted slash name with spaces")
+    b.units.nameplate1 = { name = "Kind Eyes", guid = "Player-1-0042", level = 60 }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(1)
+    eq(#b.raidWarnings, 1, "Bob marked them himself, so he's alerted")
+    eq(b.KOS:ResolveUnit("nameplate1").n, "Kind Eyes-Forever")
+end)
+
+test("search filters the Wanted list and trims spaces", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.KOS:Mark("Gankdude", "camps the flight path")
+    a.KOS:Mark("Otherguy", "")
+    a.KOS:ShowUI("wanted")
+    local w = a.KOS.WantedWidgets()
+    local function search(text)
+        w.search:SetText(text)
+        w.search.scripts.OnTextChanged(w.search)
+        return w.count:GetText()
+    end
+    eq(search(""), "2 players")
+    eq(search("flight "), "1 player", "matches notes; trailing space ignored")
+    eq(search("OTHER"), "1 player", "case-insensitive names")
+    eq(search("nobody"), "0 players")
+    assert(w.list.empty:GetText():find("No one matches"), "says nothing matched rather than 'list empty'")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

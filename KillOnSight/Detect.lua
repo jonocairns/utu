@@ -2,6 +2,10 @@
 --
 -- WoW has no "players near me" API, so we watch everything that reveals a
 -- nearby player: nameplates (~40 yd), the combat log, target and mouseover.
+--
+-- Where the client withholds the combat log (WoW: Forever), kills come from
+-- honour gains, gankers are confirmed by you after you die, and help calls
+-- come from hostile players targeting you while you take damage.
 local ADDON, ns = ...
 local KOS = ns.KOS
 
@@ -20,19 +24,25 @@ local function zoneString()
 end
 KOS.ZoneString = zoneString
 
--- Levels of players we've seen as units (the combat log doesn't carry levels).
-local levelCache, levelCacheSize = {}, 0
-local function rememberLevel(unit)
-    local guid = UnitGUID(unit)
-    local lvl = UnitLevel(unit)
-    if not guid or not lvl or lvl <= 0 then return end
-    if levelCache[guid] == nil then
-        levelCacheSize = levelCacheSize + 1
-        if levelCacheSize > 2000 then wipe(levelCache); levelCacheSize = 0 end
+-- Levels and GUIDs of players we've seen as units. The combat log and
+-- honour messages carry names only.
+local levelCache, nameGUID, cacheCount = {}, {}, 0
+local function remember(info)
+    if not info or not info.guid then return end
+    local key = KOS:Canonical(info.full)
+    if key and nameGUID[key] == nil then
+        cacheCount = cacheCount + 1
+        if cacheCount > 2000 then wipe(levelCache); wipe(nameGUID); cacheCount = 0 end
     end
-    levelCache[guid] = lvl
+    if key then nameGUID[key] = info.guid end
+    if info.level then levelCache[info.guid] = info.level end
 end
 function KOS:LevelOfGUID(guid) return guid and levelCache[guid] end
+function KOS:GUIDOfName(name)
+    local key = self:Canonical(name)
+    return key and nameGUID[key]
+end
+local plates = {} -- nameplate unit token -> nameplate frame
 
 local function label(T) return KOS:BountyTag(T) end
 
@@ -178,16 +188,20 @@ end
 
 -- Resolve a unit, learn what we can, and alert if this source is enabled.
 function KOS:CheckUnit(unit, how, alertEnabled)
-    if not UnitIsPlayer(unit) then return end
-    rememberLevel(unit)
-    local T, key, full, unitKey = self:ResolveUnit(unit)
+    local info = self:UnitInfo(unit)
+    if not info then return end
+    remember(info)
+    local T, key, full, unitKey = self:ResolveUnit(unit, info)
     if not T then return end
     if not T.virtual then
-        local guid = UnitGUID(unit)
-        if guid and not T.guid then T.guid = guid; self:InvalidateIndex() end
-        if not T.class then T.class = select(2, UnitClass(unit)) end
-        local lvl = UnitLevel(unit)
-        if lvl and lvl > 0 then T.lvl = lvl end -- for the low-level payout slide
+        if info.guid and not T.guid then T.guid = info.guid; self:InvalidateIndex() end
+        if not T.class then T.class = info.class end
+        if info.level then T.lvl = info.level end -- for the low-level payout slide
+        -- the game's spelling beats a typed one ("kind eyes" -> "Kind Eyes")
+        if key == unitKey then
+            local _, seen = self:Canonical(full)
+            if seen and T.n ~= seen then T.n = seen end
+        end
     end
     if alertEnabled then
         self:Alert(key, T, how, false, (not T.virtual and key ~= unitKey) and full or nil)
@@ -327,13 +341,206 @@ local function onPlayerDead()
     local levels = lvl and string.format(" (lvl %d vs my %d)", lvl, UnitLevel("player")) or ""
     KOS:AutoMark(full, hit.guid, nil, zoneString(), levels)
 end
-KOS.OnPlayerDead = onPlayerDead -- for tests
+
+------------------------------------------------------------------------
+-- Without a combat log: attackers, honour kills, confirming who killed you
+------------------------------------------------------------------------
+
+-- Hostile players seen targeting me: key -> { full, guid, level, class, at }
+local attackers = {}
+local lastDamaged = -100 -- GetTime() I last lost health
+local lastHealth
+local SCAN_UNITS = { "target", "focus", "mouseover" }
+
+local function noteAttacker(u)
+    if not KOS:IsTargetingMe(u) then return nil end -- cheap check first
+    local info = KOS:UnitInfo(u)
+    if not info or info.hostile == false then return nil end
+    local key = KOS:Canonical(info.full)
+    if not key or key == KOS:MyKey() then return nil end
+    remember(info)
+    local a = attackers[key] or {}
+    a.full, a.guid, a.level, a.class, a.at = info.full, info.guid, info.level, info.class, GetTime()
+    attackers[key] = a
+    return key, a
+end
+
+-- Who's targeting me right now? If I'm also taking damage, a KoS player
+-- (or anyone much higher level) among them triggers a call for help.
+local function scanAttackers()
+    if not KOS:InWorld() then return end
+    local found = {}
+    for _, u in ipairs(SCAN_UNITS) do
+        local key, a = noteAttacker(u)
+        if key then found[key] = a end
+    end
+    for u in pairs(plates) do
+        local key, a = noteAttacker(u)
+        if key then found[key] = a end
+    end
+    if KOS.caps.combatLog or not KOS.S.callForHelp or not ns.Sync then return end
+    if GetTime() - lastDamaged > 2 then return end
+    local myLevel = UnitLevel("player")
+    for _, a in pairs(found) do
+        local bully = a.level and myLevel and a.level - myLevel >= KOS.DEFEND_LEVELS
+        if bully or claimTarget(a.full, a.guid) then ns.Sync:CallForHelp(a.full) end
+    end
+end
+KOS.ScanAttackers = scanAttackers -- for tests
+
+local function onDamaged()
+    lastDamaged = GetTime()
+    scanAttackers()
+end
+
+-- Recent attackers, newest first, seen within `window` seconds.
+function KOS:RecentAttackers(window)
+    local out, now = {}, GetTime()
+    for _, a in pairs(attackers) do
+        if now - a.at <= window then out[#out + 1] = a end
+    end
+    table.sort(out, function(x, y) return x.at > y.at end)
+    return out
+end
+
+local scanTicker
+local function startScanning()
+    if scanTicker or KOS.caps.combatLog then return end
+    scanTicker = C_Timer.NewTicker(0.5, scanAttackers)
+end
+local function stopScanning()
+    if scanTicker then scanTicker:Cancel(); scanTicker = nil end
+end
+
+-- The death recap, if the client has one, may name the killing blow. Only
+-- trusted if the newest event is from another player, and only once.
+local lastRecapSig
+local function recapKiller()
+    if not KOS.caps.deathRecap then return nil end
+    local ok, events = pcall(C_DeathRecap.GetRecapEvents)
+    if not ok or type(events) ~= "table" then return nil end
+    local newest, newestT = nil, nil
+    for _, e in ipairs(events) do
+        local ts = type(e) == "table" and KOS.Safe(e.timestamp)
+        if type(ts) == "number" and (not newestT or ts >= newestT) then newest, newestT = e, ts end
+    end
+    if not newest then return nil end
+    local sig = tostring(newestT) .. "/" .. #events
+    if sig == lastRecapSig then return nil end -- the previous death's recap
+    lastRecapSig = sig
+    local guid, name = KOS.Safe(newest.sourceGUID), KOS.Safe(newest.sourceName)
+    if type(guid) ~= "string" or type(name) ~= "string" or not guid:find("^Player%-") then return nil end
+    if guid == KOS.Safe(UnitGUID("player")) then return nil end
+    return name, guid
+end
+
+local function inMyGroup(name)
+    return (UnitInParty and UnitInParty(name)) or (UnitInRaid and UnitInRaid(name)) or false
+end
+
+-- I died. Offer the players who were on me (and the death recap's killer)
+-- so I can confirm who it was; that records the gank and marks them.
+local function onPlayerDeadNoLog()
+    local at, zone = GetServerTime(), zoneString()
+    local cands, seen = {}, {}
+    local function add(full, guid, level, class, why)
+        local key = KOS:Canonical(full)
+        if not key or seen[key] or key == KOS:MyKey() or inMyGroup(KOS:Display(full)) then return end
+        seen[key] = true
+        cands[#cands + 1] = { full = select(2, KOS:Canonical(full)), guid = guid, level = level or KOS:LevelOfGUID(guid),
+            class = class, why = why, T = KOS:Lookup(key, guid) }
+    end
+    local rName, rGUID = recapKiller()
+    if rName then add(rName, rGUID, nil, nil, "death recap") end
+    for _, a in ipairs(KOS:RecentAttackers(10)) do add(a.full, a.guid, a.level, a.class) end
+    wipe(attackers)
+    if #cands == 0 or not KOS:InWorld() or KOS:ListKey() == nil then return end
+    while #cands > 3 do table.remove(cands) end
+    if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone) end
+end
+
+-- I confirmed who killed me (from the death prompt).
+function KOS:ConfirmKiller(c, at, zone)
+    zone = zone or zoneString()
+    self:RecordDeath(c.full, zone, at)
+    local myLevel = UnitLevel("player")
+    local levels = (c.level and myLevel) and string.format(" (lvl %d vs my %d)", c.level, myLevel) or ""
+    self:AutoMark(c.full, c.guid, c.class, zone, levels)
+    if not self.S.autoMark then
+        self:Notify("me", "Reported " .. self:Display(c.full) .. " for ganking you.")
+    end
+end
+
+-- Honour gains name the victim: "Gankdude dies, honorable kill Rank: ..."
+-- Every guildie credited with the kill can claim it; the bounty drains once.
+local honorPatterns
+local function buildHonorPatterns()
+    honorPatterns = {}
+    for _, gs in ipairs({ "COMBATLOG_HONORGAIN", "COMBATLOG_HONORGAIN_NO_RANK", "COMBATLOG_HONORGAIN_EXHAUSTION1" }) do
+        local fmt = _G[gs]
+        if type(fmt) == "string" and fmt:find("%%s") then
+            local pat = fmt:gsub("%%%d?%$?s", "\001"):gsub("%%%d?%$?d", "\002")
+            pat = pat:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%0")
+            pat = pat:gsub("\001", "(.-)"):gsub("\002", "%%d+")
+            honorPatterns[#honorPatterns + 1] = "^" .. pat .. "$"
+        end
+    end
+    honorPatterns[#honorPatterns + 1] = "^(.-) dies, honorable kill"
+end
+
+local function honorVictim(msg)
+    if not honorPatterns then buildHonorPatterns() end
+    msg = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h%[?(.-)%]?|h", "%1")
+    for _, pat in ipairs(honorPatterns) do
+        local name = msg:match(pat)
+        if name and name ~= "" then return name end
+    end
+end
+KOS.HonorVictim = honorVictim -- for tests
+
+local function onHonorGain(msg)
+    if type(msg) ~= "string" or KOS.IsSecret(msg) then return end
+    KOS:Sample("honor", msg)
+    if KOS.caps.combatLog then return end -- the combat log already gives us killing blows
+    local name = honorVictim(msg)
+    local key, full = KOS:Canonical(name)
+    if not key or key == KOS:MyKey() then return end
+    local guid = KOS:GUIDOfName(full)
+    local T = claimTarget(full, guid)
+    if T then
+        KOS:ClaimKill(T, zoneString(), KOS:LevelOfGUID(guid))
+    elseif KOS:RescueFor(key) then
+        KOS:ClaimDefense(full, guid, zoneString(), KOS:RescueFor(key))
+    end
+end
+
+-- /kos sos and the key binding: call for help against my target, or
+-- whoever was on me most recently.
+function KOS:ManualHelp()
+    if not ns.Sync then return end
+    if not self:InWorld() then self:Print("Help calls only work in the open world."); return end
+    local info = self:UnitInfo("target")
+    local full = info and info.hostile ~= false and self:Canonical(info.full) ~= self:MyKey() and info.full
+    if not full then
+        local recent = self:RecentAttackers(20)[1]
+        full = recent and recent.full
+    end
+    if not full then self:Print("Target the player attacking you, then call for help."); return end
+    if ns.Sync:CallForHelp(full) then
+        self:Notify("me", "Called nearby guildies for help against " .. self:Display(full) .. ".")
+    else
+        self:Print("Can't call for help against " .. self:Display(full) .. " right now (one call a minute, not in raids).")
+    end
+end
+
+KOS.OnPlayerDead = function()
+    if KOS.caps.combatLog then onPlayerDead() else onPlayerDeadNoLog() end
+end -- for tests
 
 ------------------------------------------------------------------------
 -- Nameplates: skull, tinted by bounty tier, with the weight beside it
 ------------------------------------------------------------------------
 
-local plates = {} -- unit token -> nameplate frame
 local marks = {}  -- nameplate frame -> { icon, text }
 
 local function markFor(plate)
@@ -385,11 +592,13 @@ end
 local function onTooltipUnit(tt)
     if not KOS.S or not KOS.S.tooltip then return end
     local _, unit = tt:GetUnit()
-    if not unit or not UnitIsPlayer(unit) then return end
+    if not unit or KOS.IsSecret(unit) then return end
+    local info = KOS:UnitInfo(unit)
+    if not info then return end
 
     -- guildies: show their hunter rank
-    if UnitIsInMyGuild and UnitIsInMyGuild(unit) and KOS:IsGuildList() then
-        local pts, row = KOS:PointsOf(KOS:UnitFull(unit))
+    if KOS.Try(UnitIsInMyGuild, unit) and KOS:IsGuildList() then
+        local pts, row = KOS:PointsOf(info.full)
         if pts > 0 then
             tt:AddLine("|T" .. SKULL .. ":12|t " .. KOS.RankTag(pts) .. " |cffffd100" .. pts .. " pts|r"
                 .. (row and row.revenges > 0 and (" |cffff8000" .. row.revenges .. " revenges|r") or ""))
@@ -398,7 +607,7 @@ local function onTooltipUnit(tt)
         return
     end
 
-    local T = KOS:ResolveUnit(unit)
+    local T = KOS:ResolveUnit(unit, info)
     if not T then return end
     if T.virtual then
         local r = KOS:GuildStats()[T.guild]
@@ -432,13 +641,23 @@ end
 -- Events
 ------------------------------------------------------------------------
 
-KOS:On("NAME_PLATE_UNIT_ADDED", function(unit)
-    if UnitIsPlayer(unit) then rememberLevel(unit) end -- any player: needed for "bully" help calls
+local function plateAdded(unit, retry)
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
     if not plate then return end
     plates[unit] = plate
+    local info = KOS:UnitInfo(unit)
+    if not info then
+        -- the unit may not be filled in yet when the plate appears
+        if not retry and KOS.Try(UnitIsPlayer, unit) then
+            C_Timer.After(0.2, function() if plates[unit] == plate then plateAdded(unit, true) end end)
+        end
+        return
+    end
+    remember(info) -- any player: needed for "bully" help calls
     if KOS:UpdatePlate(unit) then KOS:CheckUnit(unit, "nameplate", KOS.S.srcNameplate) end
-end)
+end
+
+KOS:On("NAME_PLATE_UNIT_ADDED", function(unit) plateAdded(unit) end)
 
 KOS:On("NAME_PLATE_UNIT_REMOVED", function(unit)
     local plate = plates[unit]
@@ -454,8 +673,24 @@ end)
 
 KOS:On("UPDATE_MOUSEOVER_UNIT", function() KOS:CheckUnit("mouseover", "mouseover", KOS.S.srcMouseover) end)
 
-if CombatLogGetCurrentEventInfo then
-    KOS:On("COMBAT_LOG_EVENT_UNFILTERED", onCombatLog)
+if KOS.caps.combatLog then
+    if not KOS:On("COMBAT_LOG_EVENT_UNFILTERED", onCombatLog) then KOS.caps.combatLog = false end
 end
 
-KOS:On("PLAYER_DEAD", onPlayerDead)
+KOS:On("PLAYER_DEAD", function() KOS.OnPlayerDead() end)
+KOS:On("CHAT_MSG_COMBAT_HONOR_GAIN", onHonorGain)
+
+-- taking damage: UNIT_COMBAT where available, else watch my health drop
+KOS:On("UNIT_COMBAT", function(unit, action)
+    if unit == "player" and action ~= "HEAL" and not KOS.IsSecret(action) then onDamaged() end
+end)
+KOS:On("UNIT_HEALTH", function(unit)
+    if unit ~= "player" then return end
+    local h = KOS.Try(UnitHealth, "player")
+    if type(h) ~= "number" then return end
+    if lastHealth and h < lastHealth then onDamaged() end
+    lastHealth = h
+end)
+KOS:On("PLAYER_REGEN_DISABLED", startScanning)
+KOS:On("PLAYER_REGEN_ENABLED", stopScanning)
+KOS:On("PLAYER_ALIVE", function() lastHealth = nil end)
