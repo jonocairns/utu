@@ -12,9 +12,7 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 
 ## Install
 
-**With WowUp (updates itself):** in WowUp, pick your WoW: Forever install, go to **Get Addons → Install from URL**, paste `https://github.com/jonocairns/utu` and install. Then turn on **Auto update** for Utu in My Addons (WowUp leaves it off for Forever by default).
-
-**By hand:** download the zip from [Releases](https://github.com/jonocairns/utu/releases/latest) and unzip it into `World of Warcraft/_forever_/Interface/AddOns/`, so you end up with `Interface/AddOns/Utu/Utu.toc`.
+Use WowUp so it updates itself: see [Install with WowUp](Utu/README.md#install-with-wowup). Or unzip the latest [release](https://github.com/jonocairns/utu/releases/latest) into `_forever_/Interface/AddOns/`.
 
 ## Development
 

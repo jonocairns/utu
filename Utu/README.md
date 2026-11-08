@@ -1,71 +1,58 @@
 # Utu
 
-*Utu* is te reo Māori for reciprocity: restoring balance after a wrong. Here, it's a guild-run kill-on-sight list and bounty game for open-world PvP, built for WoW: Forever.
+*Utu* is te reo Māori for reciprocity: restoring balance after a wrong. Here, it's a guild-run kill-on-sight list and bounty game for open-world PvP on WoW: Forever.
 
 - **Mark gankers.** Bounties grow with marks and ganks, and cool off when the ganking stops.
-- **Get warned** when a marked player arrives nearby.
-- **Claim kills** for points. Climb 50 hunter ranks each season.
+- **Get warned** when a marked player is nearby, and call guildies for help.
+- **Claim kills** for points, and climb the seasonal hunter leaderboard.
 
-Open it with `/utu` (or `/kos`), the minimap button, or the addons dropdown next to the minimap. Everything, settings included, is in the window. Slash commands are just shortcuts.
+Open it with `/utu`, the minimap button, or the addons dropdown by the minimap. Settings are in the window.
 
-## Install
+## Install with WowUp
 
-**With WowUp (updates itself):** in WowUp, pick your WoW: Forever install, go to **Get Addons → Install from URL**, paste `https://github.com/jonocairns/utu` and install. Then turn on **Auto update** for Utu in My Addons (WowUp leaves it off for Forever by default).
+WowUp keeps Utu up to date for you.
 
-**By hand:** download the zip from [Releases](https://github.com/jonocairns/utu/releases/latest) and unzip it into `World of Warcraft/_forever_/Interface/AddOns/`, so you end up with `Interface/AddOns/Utu/Utu.toc`.
+1. Install [WowUp](https://wowup.io) (the CurseForge edition, WowUp-CF) and open it.
+2. Pick **World of Warcraft: Forever** in the game dropdown at the top. If it isn't listed, add it under **Options → World of Warcraft** by choosing `World of Warcraft\_forever_\Wow.exe`.
+3. Go to **Get Addons**, click **Install from URL**, paste `https://github.com/jonocairns/utu`, then **Import** and **Install**.
+4. In **My Addons**, right-click **Utu** and tick **Auto Update**. WowUp leaves this off for Forever addons by default.
+5. Restart the game, or `/reload` if it was already running.
 
-If the addon list shows it as *Incompatible* or *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `Utu.toc`. (Forever 1.60.1 is `16001`.)
+After that, new versions install themselves while WowUp is running, or click **Update** in My Addons. If you'd installed Utu by hand before, delete `Interface/AddOns/Utu` before step 3, so WowUp manages it.
 
-If something goes wrong, the addon saves its own errors (and `/kos probe` results) in `WTF/Account/<account>/SavedVariables/Utu.lua` after you log out or `/reload`.
+**By hand instead:** unzip the latest [release](https://github.com/jonocairns/utu/releases/latest) into `World of Warcraft/_forever_/Interface/AddOns/`, so you have `AddOns/Utu/Utu.toc`.
 
-**Turn on enemy nameplates (V).** They're the main long-range detection.
+**Turn on enemy nameplates (V).** They're the main way Utu spots players.
 
-## How the game works
+## How it works
 
 | | |
 |---|---|
-| **Bounty score** | Each guildie's mark adds 100. Each guildie they kill (a "gank") adds 100; repeat ganks on the same person in the same week count half each time. Everything halves every 14 days. Each claimed kill pays the bounty down by 50, so camping someone pays less and less unless they keep ganking. |
-| **Bounty level** | Open-ended: Lv 1, 2, 3 and up. Bands: Dormant 0 · Suspect 1+ · Marked 4+ · Wanted 8+ · Most Wanted 14+ · Notorious 20+ · Public Enemy 28+ · Legendary 40+. A mark stops counting after about 8 weeks unless it's refreshed (re-marking, or being killed by them again). |
-| **Kill value** | Killing blow pays **5 + 3 × level**. The level leaves out *your* mark and *your* deaths, so you can't farm your own alt or a friend. Points slide to 0 for targets 4–10 levels below you. **+50% each:** Top Bounty (#1 on the list) · revenge (they killed a guildie in the last hour) or rescue (a guildie called for help in the last 3 minutes) · first blood (your first kill of them this season). |
-| **Assists** | Grouped guildies who hit the target in the last 20 seconds get half the base. |
-| **On WoW: Forever** | Forever doesn't give addons the combat log, so: **kills** come from honour gains, and every guildie the game credits with the kill gets the full value (the bounty still drains once per kill). **Who killed you:** after you die, a small prompt lists up to three enemy players who were targeting you. Pick everyone who was in on it: each pick records a gank against them and marks them. **Help calls** go out when a KoS player (or anyone 5+ levels above you) is targeting you while you take damage. Grey kills give no honour, so they don't score. |
-| **Calls for help** | Call by hand with `/kos sos` or a key binding (Key Bindings → AddOns → Utu). When a KoS player (or anyone 5+ levels above you) attacks you, guildies **within 400 yards in the same zone** get a banner with the distance and direction ("120 yd W") and an **On my way** button. You see who's coming. Kill the attacker within 3 minutes for +50% rescue. Responders who get there (within 150 yd when the attacker dies) earn an assist. The range is a setting: 200/400/800/1500 yd, whole zone, or anywhere. |
-| **Defending** | When anyone 5+ levels above a guildie attacks them, the guildie calls for help. Kill the attacker within 3 minutes and you mark them and earn 10 points. |
-| **Hunter ranks** | Season points give a level: Tracker I–V, Scout, Bounty Hunter, Manhunter, Avenger, Revenger, Executioner, Slayer, Warlord, Grim Reaper, then Legend N. |
-| **Badges** | First Blood, Big Game Hunter, Jackpot, Avenger, Guardian, Wingman, Nemesis Slain, Guild Breaker. |
-| **Seasons** | Automatic, every 8 weeks. The leaderboard starts fresh; claims stay as history, so nemesis, war ledger and last season's top 3 remain. The Hunters tab has a "This week" view. |
-| **Enemy guilds** | Guild bounty = the sum of its members' bounties. The whole guild becomes KOS at guild Lv 30 **and** 10+ ganks on us. Unmarked members are worth a flat 2 points. You'll see a skull on them, but no banners unless you turn those on. Each guild has a war ledger (us vs them). |
-| **Battlegrounds** | Don't count: no claims, ganks or help calls inside instances. |
+| **Bounty** | Each guildie's mark adds 100, and each guildie they kill (a gank) adds 100. Repeat ganks on the same person in a week count less each time. The bounty halves every 14 days, and drops 50 per claimed kill. |
+| **Level** | Lv 1 and up: Suspect 1+, Marked 4+, Wanted 8+, Most Wanted 14+, Notorious 20+, Public Enemy 28+, Legendary 40+. Marks expire after about 8 weeks unless refreshed. |
+| **Kill value** | **5 + 3 × level** for the killing blow, ignoring your own marks and deaths (no farming alts). Worth nothing if they're 10+ levels below you. **+50% each** for Top Bounty, revenge (they killed a guildie in the last hour) or rescue (answering a help call), and first blood (your first kill of them this season). Grouped guildies who hit them in the last 20 seconds get half. |
+| **On Forever** | Addons get no combat log, so kills come from honour gains, and grey kills don't score. After you die, a prompt lists who was targeting you: pick whoever ganked you to mark them. |
+| **Help calls** | Sent when a marked player, or anyone 5+ levels above you, attacks you. Or call by hand with `/utu sos` or a key binding. Guildies nearby (400 yd by default) get a banner with the direction and an **On my way** button. Killing the attacker within 3 minutes pays +50%. |
+| **Seasons** | Every 8 weeks the leaderboard resets. Hunter ranks run from Tracker I to Grim Reaper, then Legend N, and there are badges along the way. |
+| **Enemy guilds** | A guild's bounty is the sum of its members'. The whole guild becomes kill on sight at guild Lv 30 with 10+ ganks on us. |
+| **Battlegrounds** | Don't count. |
 
 ## Staying out of your way
 
-- **Mute a guildie.** If someone marks everyone, click **Mute...** under a player's marks (or `/utu mute Name`). Their marks stop alerting you, and their marks and sightings disappear from your Activity and chat. It's just for you: bounties, points and the leaderboard don't change, and their help calls and gank reports still show. You can also right-click a guildie's name and pick **Mute their marks**. To see who you've muted, unmute someone or mute by name, use the **Muted** button at the top of the Activity tab (or `/utu unmute Name`).
-- **Alerts on arrival only.** You're alerted when a marked player shows up, not every minute they stay. Several arrivals at once become one "6 KoS nearby" banner.
-- **Quiet thresholds.** Below bounty Lv 3 there's no alert, except for players *you* marked. Battlegrounds and arenas are quiet by default.
-- **Activity tab.** Every guild event goes there. Chat shows only what's about you, near you, or big news, at most 4 lines per 10 seconds. You can change this in Settings.
-- **Help calls.** One banner per attacker, only within range (400 yd by default), never for your own group, and at most one every 15 seconds.
-- **Zone threat.** Entering a zone with KoS sightings or guildie deaths in the last 30 minutes shows one small toast: "Stranglethorn Vale: High threat - 3 KoS seen (Gankdude Lv 14...), 2 guildies ganked". It's silent when the zone is clear and won't repeat within 10 minutes unless things get worse. Useful even if you never PvP.
-- **Tracker.** Hidden in raids and battlegrounds. Closing it snoozes it for 15 minutes.
-- **Sync during combat.** Bulk sync waits until you're out of combat.
-- **While you were away.** One summary line after you log in.
+- You're alerted when a marked player arrives, not the whole time they're around. Several at once become one banner.
+- Players under bounty Lv 3 don't alert, unless you marked them. Battlegrounds and arenas are quiet.
+- Guild events go to the **Activity** tab. Chat only shows what's about you, near you, or big news.
+- **Mute a guildie** whose marks you don't care about: right-click their name, use **Mute...** under a player's marks, or the **Muted** button in Activity. It's just for you: bounties and points don't change.
+- Entering a zone where guildies were recently ganked shows one threat toast.
 
 ## Officers
 
-The **Officer** tab sets guild rules. They're saved in the guild info text, so every member's addon uses the same ones:
-- who can pardon, who can mark
-- the whole-guild KOS level
-- bounty half-life
-- season length
+The **Officer** tab sets guild-wide rules: who can mark and pardon, the guild kill-on-sight level, bounty half-life and season length. They're saved in the guild info, so everyone gets the same rules. It also reviews suspicious claims (`farm?`, `inflated?`) and can strike them for everyone.
 
-The tab can also start the next season early. Its **claims review** flags `farm?` and `inflated?` claims and lets you strike them for everyone, and **Check for brigading** lists players with 5+ marks but no ganks.
+## Help
 
-## Limitations
-
-- Claims are self-reported; there's no server to check them against. Officer review is the backstop.
-- Detection needs nameplates, the combat log, target or mouseover. Addons can't scan for players.
-- Guild names can only be read from visible players.
-- Healers don't land killing blows, so they mostly score through assists (on Forever, honour credit pays them too).
-- Forever hides some information from addons. `/kos probe` (best with an enemy player targeted) tests what your client allows and saves the results; the Settings tab shows a summary at the top right.
-- What changed? The first login after an update lists it in chat; `/utu news` shows it again, and the full list is in [CHANGELOG.md](../CHANGELOG.md).
-- Marks not reaching a guildie? `/utu sync` shows what was sent and received this session and which guildies (and versions) you've heard from, then asks everyone online to compare lists. Both of you need to be online, and versions before 0.5.0 can't receive names with spaces.
-- Forever names can have spaces. Type them as they are in the window, or use quotes in slash commands: `/kos add "Kind Eyes" camps the flight path`.
+- **What changed?** The first login after an update lists it in chat, and `/utu news` shows it again. Every version is in the [changelog](../CHANGELOG.md).
+- **Marks not syncing?** Both of you need to be online. `/utu sync` shows what was sent and who you've heard from.
+- **Names with spaces:** use quotes in commands: `/utu add "Kind Eyes" camps the flight path`.
+- **Shows as out of date?** Make sure you're on the latest version. Forever 1.60.1 is interface `16001`.
+- **Commands:** `/utu help`. Claims are self-reported, and officer review is the check.
