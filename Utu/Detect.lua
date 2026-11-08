@@ -52,22 +52,50 @@ local function label(T) return KOS:BountyTag(T) end
 
 -- Encounters: each player alerts once per zone visit; leaving the zone (or a
 -- loading screen) starts a new visit. Several arrivals at once collapse into
--- one summary banner.
-local alerted = {} -- list key -> true once alerted this visit
+-- one summary banner. Sightings are shared separately, on the older rule:
+-- again whenever a player turns up after SHARE_GAP seconds unseen.
+local alerted = {}  -- list key -> true once alerted this visit
+local lastSeen = {} -- list key -> GetTime() of the latest sighting
+local SHARE_GAP = 180
 local visitZone
 
+-- The zone text can be empty or stale when the event fires, so ignore empty
+-- reads and look again a second later.
 local function newVisit()
     local zone = GetRealZoneText and GetRealZoneText() or ""
-    if zone ~= visitZone then wipe(alerted); visitZone = zone end
+    if zone ~= "" and zone ~= visitZone then
+        wipe(alerted)
+        visitZone = zone
+    end
 end
-KOS:On("ZONE_CHANGED_NEW_AREA", newVisit)
-KOS:On("PLAYER_ENTERING_WORLD", function() wipe(alerted); visitZone = GetRealZoneText and GetRealZoneText() or "" end)
+KOS:On("ZONE_CHANGED_NEW_AREA", function()
+    newVisit()
+    C_Timer.After(1, newVisit)
+end)
+KOS:On("PLAYER_ENTERING_WORLD", function()
+    wipe(alerted)
+    visitZone = nil
+    newVisit()
+    C_Timer.After(1, newVisit)
+end)
 
 -- Marking the player you're targeting counts as their alert for this visit:
 -- you already know they're there.
 function KOS:MarkedInView(key)
-    local info = self:UnitInfo("target")
-    if info and info.full and self:Canonical(info.full) == key then alerted[key] = true end
+    local _, listKey, _, unitKey = self:ResolveUnit("target")
+    if listKey and (listKey == key or unitKey == key) then alerted[listKey] = true end
+end
+
+-- Remember where a player was seen, show them in my tracker and tell guildies.
+function KOS:RecordSighting(T)
+    if not T.virtual then
+        T.seen = GetServerTime()
+        T.zone = zoneString()
+        T.seenBy = self:MyName()
+    end
+    if self.TrackSighting then self:TrackSighting(T, self:MyName(), zoneString()) end
+    self:ShareSighting(T)
+    if self.RefreshUI then self:RefreshUI() end
 end
 local recentAlerts = {}
 local burst
@@ -94,18 +122,25 @@ function KOS:Alert(key, T, how, isTest, seenAs)
     local mine = not T.virtual and self:MyVote(T) ~= nil
     if not isTest then
         if self:OnlyMutedMarks(T) then return end -- listed only by guildies you muted
-        if alerted[key] then return end
         -- cold bounties go quiet, except players you marked yourself (if set)
         if not T.virtual and lvl < (S.minLevel or 1) and not (mine and S.alwaysMine) then return end
         -- KoS-guild members only get a skull unless you asked for banners
         if T.virtual and not S.guildBanners then return end
-        alerted[key] = true
         local now = GetTime()
+        local fresh = not lastSeen[key] or now - lastSeen[key] > SHARE_GAP
+        lastSeen[key] = now
+        -- already warned this visit, or somewhere quiet (which doesn't use up
+        -- the warning): just share the sighting
         local quietNow = (S.quietResting and IsResting and IsResting()) or (not S.alertsInPvP and self:InPvPInstance())
+        if alerted[key] or quietNow then
+            if fresh then self:RecordSighting(T) end
+            return
+        end
+        alerted[key] = true
         for i = #recentAlerts, 1, -1 do
             if now - recentAlerts[i] > 15 then table.remove(recentAlerts, i) end
         end
-        if #recentAlerts >= 3 and not quietNow then
+        if #recentAlerts >= 3 then
             -- a crowd: one summary banner instead of one each
             if not burst then
                 burst = { n = 0 }
@@ -113,7 +148,7 @@ function KOS:Alert(key, T, how, isTest, seenAs)
             end
             burst.n = burst.n + 1
             if not burst.top or (not T.virtual and (burst.top.virtual or lvl > self:LevelOf(burst.top))) then burst.top = T end
-            if not T.virtual then T.seen, T.zone, T.seenBy = GetServerTime(), zoneString(), self:MyName() end
+            self:RecordSighting(T)
             return
         end
         recentAlerts[#recentAlerts + 1] = now
@@ -142,15 +177,7 @@ function KOS:Alert(key, T, how, isTest, seenAs)
         if (S.flash or loud) and self.Flash then self:Flash(loud) end
     end
     if isTest then return end
-
-    if not T.virtual then
-        T.seen = GetServerTime()
-        T.zone = zoneString()
-        T.seenBy = self:MyName()
-    end
-    if self.TrackSighting then self:TrackSighting(T, self:MyName(), zoneString()) end
-    self:ShareSighting(T)
-    if self.RefreshUI then self:RefreshUI() end
+    self:RecordSighting(T)
 end
 
 function KOS:PlayAlertSound(key)

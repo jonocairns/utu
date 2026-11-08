@@ -5,6 +5,11 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.7.6
+- Guildies hear about a marked player again when they turn up after a few minutes away, even though you only get one warning per zone.
+- Seeing a marked player while resting or in a battleground no longer uses up your warning for that zone.
+- Fixed zone changes sometimes being missed, which could skip or repeat a warning.
+
 ## 0.7.5
 - **One alert per zone:** each marked player now warns you once per zone visit, instead of again every time they wander back into view. Leave the zone and come back for a fresh warning.
 - Marking the player you're targeting no longer warns you about them straight after.

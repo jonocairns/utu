@@ -1,6 +1,11 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.7.6", {
+        "Guildies hear about a marked player again when they turn up after a few minutes away, even though you only get one warning per zone.",
+        "Seeing a marked player while resting or in a battleground no longer uses up your warning for that zone.",
+        "Fixed zone changes sometimes being missed, which could skip or repeat a warning.",
+    } },
     { "0.7.5", {
         "|cffffd100One alert per zone:|r each marked player now warns you once per zone visit, instead of again every time they wander back into view. Leave the zone and come back for a fresh warning.",
         "Marking the player you're targeting no longer warns you about them straight after.",

@@ -285,6 +285,87 @@ test("marking the player you're targeting doesn't then alert you about them", fu
     eq(#a.raidWarnings, 2, "and the targeted one alerts on your next visit")
 end)
 
+test("once-per-visit alerts still share sightings, and quiet places don't use up the warning", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:Mark("Gankdude", "")
+    b.KOS:Mark("Gankdude", "")
+    H.advance(5)
+    local function sights() return countSent("W") end
+    local s0 = sights()
+    a.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(#a.raidWarnings, 1)
+    eq(sights() - s0, 1, "first sighting shared")
+    -- gone 400s, back in the same zone: no banner, but guildies hear again
+    H.advance(400)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(#a.raidWarnings, 1, "no second banner this visit")
+    eq(sights() - s0, 2, "sighting shared again after a gap")
+    -- hanging around doesn't re-share
+    H.advance(30)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(sights() - s0, 2)
+    -- seen while resting (quiet): shared, but the warning is still owed
+    revisit(a)
+    H.resting = true
+    H.slash(a, "set quietResting on")
+    H.advance(400)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(#a.raidWarnings, 1, "quiet while resting")
+    eq(sights() - s0, 3, "still shared")
+    H.resting = false
+    H.advance(5)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 2, "warned once you leave the rested area")
+end)
+
+test("zone visits: empty or late zone names don't miss or double the reset", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.KOS:Mark("Gankdude", "")
+    a.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 1)
+    -- the zone name is briefly empty, then the same zone again: same visit
+    a.zone = ""
+    H.fire(a, "ZONE_CHANGED_NEW_AREA")
+    a.zone = nil
+    H.advance(2)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 1, "not a new visit")
+    -- the event fires before the name updates: picked up a second later
+    H.fire(a, "ZONE_CHANGED_NEW_AREA")
+    a.zone = "Duskwood"
+    H.advance(2)
+    a.zone = nil
+    H.fire(a, "ZONE_CHANGED_NEW_AREA")
+    H.advance(2)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 2, "the late zone change still started a new visit")
+    -- a loading screen always starts one
+    H.fire(a, "PLAYER_ENTERING_WORLD", false, false)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 3)
+end)
+
+test("marking a renamed player from their list entry while targeting them doesn't alert", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    b.KOS:Mark("Oldname", "", "Player-1-0009", "ROGUE")
+    H.advance(5)
+    a.units.target = { name = "Newname", guid = "Player-1-0009" }
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    eq(#a.raidWarnings, 0, "below Alice's threshold")
+    a.KOS:Mark("Oldname", "")
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    eq(#a.raidWarnings, 0, "you already know he's there")
+end)
+
 test("a crowd of KoS players collapses into one summary banner", function()
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
