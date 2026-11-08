@@ -6,7 +6,7 @@
 --   Activity  every guild event (chat only gets the important ones)
 --   Settings  personal settings
 --   Officer   guild rules, seasons and claim review (officers only)
-local ADDON, ns = ...
+local _, ns = ...
 local KOS = ns.KOS
 
 local W, H = 820, 560
@@ -436,7 +436,6 @@ local function buildHunters()
     hunters.toggle:SetPoint("TOPRIGHT", p, "TOPLEFT", LIST_W, -76)
 
     hunters.list = List(p, 10, -102, LIST_W, H + TOP - 28 - 110, 38, buildRow, function(r, h, i)
-        local rank = KOS.HunterRank(h.points)
         local medal = (i == 1 and { 1, 0.84, 0 }) or (i == 2 and { 0.75, 0.75, 0.75 }) or (i == 3 and { 0.8, 0.5, 0.2 }) or { 0.6, 0.6, 0.6 }
         r.badge:Set(i, medal[1], medal[2], medal[3])
         r.title:SetText(KOS:Display(h.name) .. "  " .. KOS.RankTag(h.points)

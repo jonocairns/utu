@@ -317,6 +317,35 @@ function H.newClient(name, opts)
         end,
     }
 
+    -- Embedded libraries (the real ones need game frames), stubbed:
+    -- ChatThrottleLib sends straight away and retries throttled sends, like
+    -- the real one; LibDataBroker/LibDBIcon record what the addon asks for.
+    c.ctl = {}
+    env.ChatThrottleLib = { version = 99 }
+    function env.ChatThrottleLib:SendAddonMessage(prio, prefix, text, chattype, target, queueName, cb, arg)
+        assert(prio == "BULK" or prio == "NORMAL" or prio == "ALERT", "bad priority " .. tostring(prio))
+        c.ctl[#c.ctl + 1] = { prio = prio, msg = text }
+        local function try()
+            local r = env.C_ChatInfo.SendAddonMessage(prefix, text, chattype, target)
+            if r == 3 then env.C_Timer.After(0.5, try); return end
+            if cb then cb(arg, r == 0, r) end
+        end
+        try()
+    end
+    c.minimap = { objects = {}, shown = {} }
+    local libs = {
+        ["LibDataBroker-1.1"] = { NewDataObject = function(_, name, obj) c.minimap.objects[name] = obj; return obj end },
+        ["LibDBIcon-1.0"] = {
+            Register = function(_, name, obj, db) c.minimap.db = db; c.minimap.registered = name end,
+            Show = function(_, name) c.minimap.shown[name] = true end,
+            Hide = function(_, name) c.minimap.shown[name] = false end,
+        },
+    }
+    env.LibStub = setmetatable({}, { __call = function(_, name, silent)
+        if not libs[name] and not silent then error("no library " .. name) end
+        return libs[name]
+    end })
+
     local ns = {}
     for _, f in ipairs(FILES) do
         local chunk = assert(loadfile(ADDON_DIR .. f))

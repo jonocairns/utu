@@ -150,7 +150,7 @@ function KOS:BuildSettings(parent)
     y = check("srcTarget", "Targeting", nil, COL1, y)
     y = check("srcMouseover", "Mouseover", "Can be chatty in busy places.", COL1, y)
     y = check("guildAlerts", "Skull on members of KoS guilds", nil, COL1, y)
-    y = check("guildBanners", "...and banner them too", "Off by default: a KoS guild can have a lot of members.", COL1, y)
+    check("guildBanners", "...and banner them too", "Off by default: a KoS guild can have a lot of members.", COL1, y)
 
     -- column 2
     y = -28
@@ -177,7 +177,7 @@ function KOS:BuildSettings(parent)
     y = check("announce", "Tell guildies when I spot someone", "Hidden addon message: only guildies with Utu see it.", COL2, y)
     y = check("callForHelp", "Call for help when a KoS player attacks me", "Also anyone 5+ levels above you. Guildies nearby get a banner; killing your attacker within 3 minutes earns a rescue bonus. Call by hand with /kos sos or a key binding (Key Bindings > AddOns > Utu).", COL2, y)
     y = check("partyChat", "Post sightings in party/raid chat", "Visible to your group. Max one per player every 5 minutes.", COL2, y)
-    y = check("guildChat", "Post sightings in guild chat", "Visible to everyone in the guild. Max one per player every 5 minutes.", COL2, y)
+    check("guildChat", "Post sightings in guild chat", "Visible to everyone in the guild. Max one per player every 5 minutes.", COL2, y)
 
     return function()
         for _, c in ipairs(controls) do c.refresh() end

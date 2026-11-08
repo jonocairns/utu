@@ -19,6 +19,8 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 | | |
 |---|---|
 | `Utu/` | The addon itself. Load order is in `Utu.toc`. |
+| `Utu/Libs/` | Embedded standard libraries: LibStub, CallbackHandler, LibDataBroker and LibDBIcon (the minimap button), ChatThrottleLib (shares addon-message bandwidth with other addons). See `Utu/Libs/README.md`. The test harness stubs them. |
+| `.luacheckrc` | Lint config. |
 | `tests/harness.lua` | A mock of the WoW API that runs several clients on a shared message bus with a virtual clock. Set `H.forever = true` to mock WoW: Forever (no combat log, secret values via `H.SECRET`). |
 | `tests/run.lua` | The test suite. |
 | `build.sh` | Packages `dist/Utu-<version>.zip`. |
@@ -28,6 +30,12 @@ Run the tests with Lua 5.1:
 ```sh
 lua5.1 tests/run.lua           # all tests
 lua5.1 tests/run.lua "pardon"  # only tests whose name contains "pardon"
+```
+
+Lint with [luacheck](https://github.com/lunarmodules/luacheck) before committing; it should report 0 warnings:
+
+```sh
+luacheck Utu
 ```
 
 The mock can't catch missing UI templates, protected-frame errors or real-client API differences. Before a release, also test in game with `/console scriptErrors 1`, and run `/kos probe` near an enemy player.

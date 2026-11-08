@@ -199,9 +199,28 @@ if Enum and Enum.SendAddonMessageResult then
     end
 end
 
--- true = done with this message (sent or permanently failed), false = retry
-local function sendRaw(msg)
+-- ChatThrottleLib reports back whether each message went out.
+local function onSent(_, didSend, result)
+    if didSend then
+        local st = stats()
+        if st then st.sent = st.sent + 1 end
+    else
+        bump("fail", "code " .. tostring(result))
+    end
+end
+
+-- true = done with this message (sent, handed on, or permanently failed),
+-- false = retry. Messages go through ChatThrottleLib when it's loaded (it's
+-- embedded), which shares the addon-message bandwidth with every other
+-- addon using it and retries throttled sends itself.
+local function sendRaw(msg, prio)
     if #msg > MAX_MSG then return true end -- can't ever send; itemMsg should have prevented this
+    local ctl = _G.ChatThrottleLib
+    if ctl and ctl.SendAddonMessage then
+        local ok = pcall(ctl.SendAddonMessage, ctl, prio or "NORMAL", PREFIX, msg, "GUILD", nil, nil, onSent)
+        if not ok then bump("fail", "error") end
+        return true
+    end
     local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, "GUILD")
     if not ok then bump("fail", "error"); return true end
     if res == false then return false end -- older clients: false = throttled
@@ -226,7 +245,7 @@ local function pump()
         if #hi == 0 and #lo == 0 and ticker then ticker:Cancel(); ticker = nil end
         return
     end
-    if sendRaw(q[1]) then table.remove(q, 1) end -- else throttled: retry next tick
+    if sendRaw(q[1], q == hi and "NORMAL" or "BULK") then table.remove(q, 1) end -- else throttled: retry next tick
     if KOS.UpdateFooter then KOS:UpdateFooter() end
 end
 
@@ -641,19 +660,19 @@ function Sync:OnMessage(text, sender, isRetry)
         local where = dist and string.format("%d yd %s", dist, dir) or zone
         local verb = (how == "t" and " is under attack, likely by ") or (how == "m" and " needs help against ")
             or " is being ganked by "
-        local text = "HELP! " .. KOS:Display(senderFull) .. verb .. KOS:Display(full) .. " - " .. where
+        local helpText = "HELP! " .. KOS:Display(senderFull) .. verb .. KOS:Display(full) .. " - " .. where
         local mode = KOS.S.helpBanner
         local show = (mode == "any") or (mode == "zone" and sameZone) or (mode == "near" and near)
         local now = GetTime()
         if show and not grouped and KOS:InWorld() and now - (Sync.lastHelpBanner or -100) >= 15 then
             Sync.lastHelpBanner = now
             if RaidNotice_AddMessage and RaidWarningFrame then
-                RaidNotice_AddMessage(RaidWarningFrame, text, { r = 0.25, g = 0.75, b = 1 })
+                RaidNotice_AddMessage(RaidWarningFrame, helpText, { r = 0.25, g = 0.75, b = 1 })
             end
             PlaySound(8959, "Master")
-            if KOS.ShowHelpPrompt then KOS:ShowHelpPrompt(full, senderFull, where, T) end
+            if KOS.ShowHelpPrompt then KOS:ShowHelpPrompt(full, senderFull, where, T, verb) end
         end
-        KOS:Notify((near and not grouped) and "nearby" or "info", "|cff40c0ff" .. text .. "|r"
+        KOS:Notify((near and not grouped) and "nearby" or "info", "|cff40c0ff" .. helpText .. "|r"
             .. (T and (" (" .. KOS:BountyTag(T) .. ")") or "") .. " - kill them within 3 minutes for a rescue bonus.")
         if T and KOS.TrackSighting then KOS:TrackSighting(T, senderFull, zone) end
 

@@ -621,7 +621,7 @@ function KOS:RepairNames(list)
     list.targets = targets
 
     local deaths = {}
-    for id, d in pairs(list.deaths) do
+    for _, d in pairs(list.deaths) do
         d.victim, d.killer = fix(d.victim), fix(d.killer)
         local nid = self.DeathId(d)
         if not deaths[nid] then deaths[nid] = d end
@@ -629,7 +629,7 @@ function KOS:RepairNames(list)
     list.deaths = deaths
 
     local kills = {}
-    for id, k in pairs(list.kills) do
+    for _, k in pairs(list.kills) do
         k.target, k.by, k.rev, k.res = fix(k.target), fix(k.by), fix(k.rev), fix(k.res)
         local nid = self.KillId(k)
         local cur = kills[nid]
@@ -1310,7 +1310,7 @@ end
 
 -- Remove *my* mark.
 function KOS:Unmark(name)
-    local key, full = self:Canonical(name)
+    local key = self:Canonical(name)
     local T = key and self:GetTarget(key)
     local old = T and T.votes[self:MyKey()]
     if not old or old.del then self:Print("You haven't marked", tostring(name) .. "."); return end
@@ -2332,9 +2332,9 @@ function Utu_OnAddonCompartmentClick(_, button)
     if not KOS.db then return end
     if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
 end
-function Utu_OnAddonCompartmentEnter(_, frame)
-    if not GameTooltip or not frame then return end
-    GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
+function Utu_OnAddonCompartmentEnter(_, button)
+    if not GameTooltip or not button then return end
+    GameTooltip:SetOwner(button, "ANCHOR_LEFT")
     GameTooltip:AddLine("Utu")
     GameTooltip:AddLine("Left-click: open the list. Right-click: settings.", 1, 1, 1)
     GameTooltip:Show()

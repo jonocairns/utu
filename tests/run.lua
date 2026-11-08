@@ -1373,5 +1373,54 @@ test("activity shows marks and ganks that arrived by sync, your own marks, and n
     eq(count(a, "spotted Someone"), 1, "event-only entries are kept")
 end)
 
+test("minimap button is a LibDBIcon launcher and keeps the old position", function()
+    local a = H.newClient("Alice", { db = { settings = { minimapAngle = 123 } } })
+    H.advance(5)
+    eq(a.minimap.registered, "Utu")
+    local obj = a.minimap.objects.Utu
+    eq(obj.type, "launcher")
+    eq(a.minimap.db.minimapPos, 123, "carried over from the old button")
+    eq(a.minimap.shown.Utu, true)
+    H.slash(a, "set minimap false")
+    eq(a.minimap.shown.Utu, false, "the setting hides it")
+    eq(a.minimap.db.hide, true)
+    local lines = {}
+    obj.OnTooltipShow({ AddLine = function(_, l) lines[#lines + 1] = l end })
+    eq(lines[1], "Utu")
+end)
+
+test("sync goes through ChatThrottleLib: live messages NORMAL, bulk sync BULK", function()
+    local b = H.newClient("Bob")
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    local a = H.newClient("Alice")
+    H.advance(30)
+    local prio = {}
+    for _, m in ipairs(b.ctl) do prio[m.msg:sub(1, 1)] = m.prio end
+    eq(prio.S, "NORMAL", "live mark")
+    eq(prio.D, "BULK", "dump item")
+    assert(a.KOS:Lookup("gankdude-forever"), "still syncs")
+    assert(b.KOS.db.diag.sync.sent > 0, "sends counted from the callback")
+end)
+
+test("help banner wording follows the kind of call", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    b.KOS.S.helpBanner = "any"
+    local verbs = {}
+    b.KOS.ShowHelpPrompt = function(_, attacker, victim, where, T, verb) verbs[#verbs + 1] = verb end
+    local function call(attacker, how)
+        H.fire(b, "CHAT_MSG_ADDON", b.KOS.PREFIX, "A\t" .. attacker .. "\tElwynn Forest\t\t\t\t" .. (how or ""), "GUILD", "Alice-Forever")
+        H.advance(20)
+    end
+    call("Gankone-Forever", "t")
+    call("Ganktwo-Forever", "m")
+    call("Gankthree-Forever", nil)
+    eq(verbs[1], " is under attack, likely by ")
+    eq(verbs[2], " needs help against ")
+    eq(verbs[3], " is being ganked by ")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

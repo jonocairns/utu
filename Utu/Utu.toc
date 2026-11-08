@@ -2,12 +2,23 @@
 ## Title: Utu
 ## Notes: Guild-shared kill-on-sight list with bounties, a hunter leaderboard and enemy-guild tracking.
 ## Author: jonoc
-## Version: 0.6.9
+## Version: 0.7.0
+## Category: PvP
 ## SavedVariables: UtuDB
 ## IconTexture: Interface\TargetingFrame\UI-RaidTargetingIcon_8
 ## AddonCompartmentFunc: Utu_OnAddonCompartmentClick
 ## AddonCompartmentFuncOnEnter: Utu_OnAddonCompartmentEnter
 ## AddonCompartmentFuncOnLeave: Utu_OnAddonCompartmentLeave
+## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, ChatThrottleLib
+## X-Website: https://github.com/jonocairns/utu
+## X-License: MIT
+
+# Embedded libraries (each under its own licence; see Libs/README.md)
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\ChatThrottleLib\ChatThrottleLib.lua
 
 Core.lua
 Caps.lua

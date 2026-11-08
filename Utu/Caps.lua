@@ -259,7 +259,7 @@ function KOS:Probe()
         end
         pcall(f.UnregisterAllEvents, f)
     end)
-    for k, v in pairs(self.blockedEvents or {}) do p.register[k] = "refused at load" end
+    for k in pairs(self.blockedEvents or {}) do p.register[k] = "refused at load" end
 
     step(p, "player", function()
         p.player = probeUnit("player")

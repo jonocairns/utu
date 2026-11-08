@@ -6,7 +6,7 @@
 -- Where the client withholds the combat log (WoW: Forever), kills come from
 -- honour gains, gankers are confirmed by you after you die, and help calls
 -- come from hostile players targeting you while you take damage.
-local ADDON, ns = ...
+local _, ns = ...
 local KOS = ns.KOS
 
 local band = bit.band
@@ -267,7 +267,7 @@ local function groupedGuildie(name)
 end
 
 local function onCombatLog()
-    local _, sub, _, sGUID, sName, sFlags, _, dGUID, dName, dFlags, _, p12, p13, p14, p15, p16 = CombatLogGetCurrentEventInfo()
+    local _, sub, _, sGUID, sName, sFlags, _, dGUID, dName, dFlags, _, _, p13, p14, _, p16 = CombatLogGetCurrentEventInfo()
     local me = UnitGUID("player")
     local destIsPlayer = dName and dFlags and band(dFlags, PLAYER_FLAG) ~= 0
     local srcIsPlayer = sName and sFlags and band(sFlags, PLAYER_FLAG) ~= 0

@@ -1,6 +1,6 @@
 -- Utu: on-screen extras. Screen flash, target-frame badge,
 -- "recently spotted" tracker and minimap button.
-local ADDON, ns = ...
+local _, ns = ...
 local KOS = ns.KOS
 local SKULL = KOS.SKULL
 
@@ -296,14 +296,16 @@ local function buildHelpPrompt()
     close:SetScript("OnClick", function() helpPrompt:Hide() end)
 end
 
-function KOS:ShowHelpPrompt(attackerFull, victimFull, where, T)
+-- verb: " is being ganked by " (default), " is under attack, likely by "
+-- (a guess from who was targeting them) or " needs help against " (manual).
+function KOS:ShowHelpPrompt(attackerFull, victimFull, where, T, verb)
     if not helpPrompt then buildHelpPrompt() end
     helpPrompt.attacker, helpPrompt.victim, helpPrompt.responders = attackerFull, victimFull, 0
     helpPrompt.icon:SetVertexColor(0.25, 0.75, 1)
     helpPrompt.go:Enable()
     helpPrompt.go:SetText("On my way")
     helpPrompt.sub:SetText(T and ("Worth " .. (self:ClaimValue(T)) .. " pts, +50% rescue") or "Defend them: +" .. self.DEFENSE_POINTS .. " pts")
-    helpPrompt:Pop("|cff40c0ffHELP!|r " .. self:Display(victimFull) .. " is being ganked by |cffff6060"
+    helpPrompt:Pop("|cff40c0ffHELP!|r " .. self:Display(victimFull) .. (verb or " is being ganked by ") .. "|cffff6060"
         .. self:Display(attackerFull) .. "|r - " .. where, 30)
 end
 
@@ -403,76 +405,47 @@ end
 -- Minimap button (drag around the rim; left = list, right = settings)
 ------------------------------------------------------------------------
 
-local mmButton
-local function positionButton()
-    local a = math.rad(KOS.S.minimapAngle or 200)
-    local r = (Minimap:GetWidth() / 2) + 10
-    mmButton:ClearAllPoints()
-    mmButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(a) * r, math.sin(a) * r)
+-- The standard LibDataBroker launcher + LibDBIcon button, like most
+-- addons: UI packs that gather minimap buttons (EllesmereUI, OneForAll,
+-- etc.) recognise it, and it remembers where you dragged it.
+local launcher
+local function iconDB()
+    local S = KOS.S
+    if not S.minimapIcon then
+        -- carry over the position of the pre-0.7 button (same angle convention)
+        S.minimapIcon = { minimapPos = S.minimapAngle or 200 }
+    end
+    S.minimapIcon.hide = not S.minimap
+    return S.minimapIcon
 end
 
-local function createMinimapButton()
-    if mmButton or not Minimap then return end
-    mmButton = CreateFrame("Button", "UtuMinimapButton", Minimap)
-    mmButton:SetSize(31, 31)
-    -- Don't pin the strata or level: UI packs (e.g. EllesmereUI) move addon
-    -- buttons into their own pop-out and raise them above it.
-    mmButton:SetFrameStrata("MEDIUM")
-    mmButton:SetFrameLevel(8)
-    mmButton:RegisterForClicks("AnyUp")
-    mmButton:RegisterForDrag("LeftButton")
-    mmButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-
-    local bg = mmButton:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(20, 20)
-    bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-    bg:SetPoint("TOPLEFT", 7, -5)
-    local icon = mmButton:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(17, 17)
-    icon:SetTexture(SKULL)
-    icon:SetPoint("TOPLEFT", 7, -6)
-    local border = mmButton:CreateTexture(nil, "OVERLAY")
-    border:SetSize(53, 53)
-    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    border:SetPoint("TOPLEFT")
-
-    mmButton:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
-    end)
-    mmButton:SetScript("OnDragStart", function(self)
-        -- Only drag around the minimap's edge while it's still ours; a UI
-        -- pack that has moved it into its own pop-out handles placement.
-        if self:GetParent() ~= Minimap then return end
-        self:SetScript("OnUpdate", function()
-            local mx, my = Minimap:GetCenter()
-            local cx, cy = GetCursorPosition()
-            local s = Minimap:GetEffectiveScale()
-            KOS.S.minimapAngle = math.deg(math.atan2(cy / s - my, cx / s - mx))
-            positionButton()
-        end)
-    end)
-    mmButton:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
-    mmButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Utu")
-        local pts = KOS:PointsOf(KOS:MyName())
-        GameTooltip:AddLine("You: " .. KOS.RankTag(pts) .. " (" .. pts .. " pts)", 1, 1, 1)
-        local r = KOS:ZoneThreat()
-        GameTooltip:AddLine((GetRealZoneText() or "") .. ": |c" .. r.color .. r.label .. "|r", 1, 1, 1)
-        GameTooltip:AddLine("Left-click: list   Right-click: settings", 0.6, 0.6, 0.6)
-        GameTooltip:Show()
-    end)
-    mmButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    positionButton()
+local function onTooltip(tt)
+    tt:AddLine("Utu")
+    local pts = KOS:PointsOf(KOS:MyName())
+    tt:AddLine("You: " .. KOS.RankTag(pts) .. " (" .. pts .. " pts)", 1, 1, 1)
+    local r = KOS:ZoneThreat()
+    tt:AddLine((GetRealZoneText() or "") .. ": |c" .. r.color .. r.label .. "|r", 1, 1, 1)
+    tt:AddLine("Left-click: list   Right-click: settings", 0.6, 0.6, 0.6)
 end
 
 function KOS:UpdateMinimapButton()
-    if self.S.minimap then
-        createMinimapButton()
-        if mmButton then mmButton:Show() end
-    elseif mmButton then
-        mmButton:Hide()
+    local LDB = LibStub and LibStub("LibDataBroker-1.1", true)
+    local DBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
+    if not (LDB and DBIcon) then return end
+    local db = iconDB()
+    if not launcher then
+        launcher = LDB:NewDataObject("Utu", {
+            type = "launcher",
+            text = "Utu",
+            icon = SKULL,
+            OnClick = function(_, button)
+                if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
+            end,
+            OnTooltipShow = onTooltip,
+        })
+        DBIcon:Register("Utu", launcher, db)
     end
+    if db.hide then DBIcon:Hide("Utu") else DBIcon:Show("Utu") end
 end
 
 KOS:On("PLAYER_LOGIN", function() KOS:UpdateMinimapButton() end)
