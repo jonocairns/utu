@@ -632,6 +632,10 @@ function Sync:OnMessage(text, sender, isRetry)
         -- pardon valid, since current officers still relay it.
         if destructive and not isRetry and deferIfUnknown(kind, senderFull, text, sender) then return end
         if destructive and not KOS:CanPardon(senderFull) then return end
+        -- relayed items in my name: check them against what I actually did
+        if (kind == "vote" or kind == "kill") and KOS:Canonical(it.by) == KOS:MyKey() then
+            if kind == "vote" then KOS:AuditVote(it, senderFull) else KOS:AuditKill(it, senderFull) end
+        end
         if applyItem(kind, it) then
             Sync:CountAway(kind, it)
             refreshSoon()
@@ -829,5 +833,10 @@ function Sync:Status()
         end
         KOS:Print("Heard from: " .. table.concat(parts, "; ") .. ".")
         KOS:Print("Versions before 0.5.0 can't receive names with spaces.")
+    end
+    local flags = KOS:FlagLines()
+    if #flags > 0 then
+        KOS:Print("Possible forgeries in your name (newest first):")
+        for i = 1, math.min(#flags, 10) do DEFAULT_CHAT_FRAME:AddMessage("  - " .. flags[i]) end
     end
 end

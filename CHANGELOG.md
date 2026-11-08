@@ -5,6 +5,9 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.7.8
+- **Forgery check:** if a sync brings in a mark, mark removal or bounty claim in your name that you never made, Utu warns you ("Possible forgery"), names the guildie whose sync relayed it, and lists it in `/utu sync`. Re-add a removed mark with `/utu add`; tell an officer about claims.
+
 ## 0.7.7
 - **Harder to abuse:** Utu now ignores synced marks and claims dated in the future, and names can't carry colours, icons or links into other players' chat.
 - A damaged saved list no longer stops Utu loading; the broken entries are dropped.

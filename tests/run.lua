@@ -1685,5 +1685,123 @@ test("damaged saved data is dropped instead of stopping the addon loading", func
     eq(next(list.kills), nil); eq(next(list.deaths), nil); eq(next(list.struck), nil)
 end)
 
+test("forgery check: items in my name that I never made are flagged, not rejected", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local K = a.KOS
+    local now = math.floor(H.serverTime)
+    local function dump(c, item) H.fire(c, "CHAT_MSG_ADDON", K.PREFIX, "D\t" .. item, "GUILD", "Bob-Forever") end
+    local function flagged(c, needle)
+        for _, l in ipairs(c.chat) do if l:find("Possible forgery", 1, true) and (not needle or l:find(needle, 1, true)) then return true end end
+        return false
+    end
+    local function flags(c) return #c.KOS:Ledger().flags end
+    K:Mark("Gankdude", "camps the flight path")
+    H.advance(5)
+    local mine = T_(a, "Gankdude").votes[K:MyKey()]
+    -- my own mark coming back unchanged (or as an older copy) is fine
+    dump(a, "v\tGankdude-Forever\tAlice-Forever\t" .. mine.t .. "\t0\t\t\tcamps the flight path")
+    dump(a, "v\tGankdude-Forever\tAlice-Forever\t" .. mine.t .. "\t0\t\t\tcamps the fli")
+    dump(a, "v\tGankdude-Forever\tAlice-Forever\t" .. (mine.t - 50) .. "\t0\t\t\told note")
+    eq(flags(a), 0, "no flags for real or stale copies")
+    -- a forged removal of my mark: flagged with the relay named, and still applied
+    dump(a, "v\tGankdude-Forever\tAlice-Forever\t" .. (mine.t + 10) .. "\t1\t\t\t")
+    assert(flagged(a, "relayed by Bob"), "warned, naming the relay")
+    assert(flagged(a, "/utu add Gankdude"), "with the fix")
+    eq(K:MyVote(T_(a, "Gankdude")), nil, "data handling unchanged: the removal applied")
+    -- the same item again isn't flagged twice
+    dump(a, "v\tGankdude-Forever\tAlice-Forever\t" .. (mine.t + 10) .. "\t1\t\t\t")
+    eq(flags(a), 1)
+    -- re-marking puts it back for everyone
+    b.KOS:MergeVote("gankdude-forever", "Gankdude-Forever", { by = "Alice-Forever", t = mine.t + 10, del = true, note = "" })
+    H.slash(a, "add Gankdude camps the flight path")
+    H.advance(5)
+    assert(K:MyVote(T_(a, "Gankdude")), "re-marked")
+    assert(b.KOS:MyVote(T_(b, "Gankdude")) == nil and T_(b, "Gankdude").votes["alice-forever"] and not T_(b, "Gankdude").votes["alice-forever"].del,
+        "Bob has Alice's mark back")
+    -- a mark in my name on someone I never marked
+    dump(a, "v\tVictim-Forever\tAlice-Forever\t" .. now .. "\t0\t\t\tforged")
+    assert(flagged(a, "Victim"))
+    -- claims: a lowered copy of mine is flagged; a made-up one too
+    K:RecordClaim({ target = "Gankdude-Forever", by = "Alice-Forever", t = now + 1, v = 20, zone = "" }, function() return "x" end)
+    K:RecordClaim({ target = "Gankdude-Forever", by = "Alice-Forever", t = now + 1, v = 12, zone = "" }, function() return "x" end)
+    dump(a, "k\tGankdude-Forever\tAlice-Forever\t" .. (now + 1) .. "\t20\t\t\t\t")
+    eq(flags(a), 2, "a higher copy of a claim that shares an id with a lower one isn't flagged")
+    dump(a, "k\tGankdude-Forever\tAlice-Forever\t" .. (now + 1) .. "\t0\t\t\t\t")
+    assert(flagged(a, "from 12 to 0"), "zeroing flagged")
+    dump(a, "k\tSomeone-Forever\tAlice-Forever\t" .. now .. "\t40\t\t\t\t")
+    eq(flags(a), 4, "recorded")
+    assert(not flagged(a, "40-point bounty claim"), "but at most 3 warnings a minute")
+    H.advance(61)
+    dump(a, "v\tVictimtwo-Forever\tAlice-Forever\t" .. now .. "\t0\t\t\tforged")
+    assert(flagged(a, "1 more flagged; see /utu sync"), "the held-back one is mentioned")
+    -- shown in /utu sync
+    H.slash(a, "sync")
+    assert(H.chatContains(a, "Possible forgeries in your name"))
+    -- items for other people aren't audited
+    local before = flags(a)
+    dump(a, "v\tGankdude-Forever\tCarol-Forever\t" .. now .. "\t0\t\t\t")
+    eq(flags(a), before)
+end)
+
+test("forgery check: no flags for history from before tracking, a reinstall, or an alt", function()
+    local now = math.floor(H.serverTime)
+    -- saved data from 0.7.7: my mark and claim already in the list
+    local db = { lists = { ["Gankbusters-Forever"] = {
+        targets = { ["gankdude-forever"] = { n = "Gankdude-Forever", w = 1, on = true,
+            votes = { ["alice-forever"] = { by = "Alice-Forever", t = now - 500, note = "old" } } } },
+        kills = { ["alice-forever|gankdude-forever|" .. (now - 400)] = { by = "Alice-Forever", target = "Gankdude-Forever", t = now - 400, v = 15 } },
+        deaths = {}, struck = {},
+    } } }
+    local a = H.newClient("Alice", { db = db })
+    H.newClient("Bob")
+    H.advance(20)
+    local K = a.KOS
+    local function dump(item) H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, "D\t" .. item, "GUILD", "Bob-Forever") end
+    dump("v\tGankdude-Forever\tAlice-Forever\t" .. (now - 500) .. "\t0\t\t\told")
+    dump("k\tGankdude-Forever\tAlice-Forever\t" .. (now - 400) .. "\t15\t\t\t\t")
+    -- something "of mine" dated before this install started tracking: unknown, not flagged
+    dump("v\tOther-Forever\tAlice-Forever\t" .. (now - 300) .. "\t0\t\t\t")
+    eq(#K:Ledger().flags, 0, "seeded from the saved list")
+    -- an alt on the same account (shared saved data) keeps its own record
+    local alt = H.newClient("Alicealt", { db = db })
+    H.advance(20)
+    alt.KOS:Mark("Thing", "")
+    assert(alt.KOS:Ledger() ~= K:Ledger(), "separate records")
+    eq(K:Ledger().votes["thing-forever"], nil)
+    H.advance(300)
+    assert(allSame(), "lists still converge")
+end)
+
+test("forgery check edge cases: old claims, pardons, far-ahead forged removals", function()
+    local a = H.newClient("Alice", { rank = 1 })
+    local b = H.newClient("Bob")
+    H.advance(20)
+    local K = a.KOS
+    local now = math.floor(H.serverTime)
+    local function dump(item) H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, "D\t" .. item, "GUILD", "Bob-Forever") end
+    K:Ledger()
+    -- a claim past the horizon is never judged
+    dump("k\tGankdude-Forever\tAlice-Forever\t" .. (K:KillHorizon() - 10) .. "\t40\t\t\t\t")
+    eq(#K:Ledger().flags, 0)
+    -- forged removal dated as far ahead as sync allows; then a pardon; re-marking still wins everywhere
+    K:Mark("Gankdude", "")
+    H.advance(5)
+    local t = T_(a, "Gankdude").votes[K:MyKey()].t
+    local forged = "D\tv\tGankdude-Forever\tAlice-Forever\t" .. (math.floor(H.serverTime) + 3600) .. "\t1\t\t\t"
+    H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, forged, "GUILD", "Carol-Forever")
+    H.fire(b, "CHAT_MSG_ADDON", K.PREFIX, forged, "GUILD", "Carol-Forever")
+    eq(#K:Ledger().flags, 1)
+    assert(T_(b, "Gankdude").votes["alice-forever"].del, "Bob took the forged removal")
+    assert(T_(a, "Gankdude").votes[K:MyKey()].t > t)
+    K:Pardon("Gankdude")
+    H.advance(2)
+    H.slash(a, "add Gankdude back again")
+    H.advance(5)
+    assert(K:MyVote(T_(a, "Gankdude")), "Alice's mark is back")
+    local bv = T_(b, "Gankdude").votes["alice-forever"]
+    assert(not bv.del, "and Bob has it")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

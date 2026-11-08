@@ -55,4 +55,5 @@ The **Officer** tab sets guild-wide rules: who can mark and pardon, the guild ki
 - **Marks not syncing?** Both of you need to be online. `/utu sync` shows what was sent and who you've heard from.
 - **Names with spaces:** use quotes in commands: `/utu add "Kind Eyes" camps the flight path`.
 - **Shows as out of date?** Make sure you're on the latest version. Forever 1.60.1 is interface `16001`.
+- **Faked marks or claims:** there's no server, so a guildie who scripts addon messages could pass off marks, removals or claims in your name. Your client checks anything synced in your name against what you actually did, warns you if it doesn't match ("Possible forgery"), and lists it in `/utu sync`. Re-add a removed mark with `/utu add`; tell an officer about claims.
 - **Commands:** `/utu help`. Claims are self-reported, and officer review is the check.

@@ -30,6 +30,7 @@
   - ignore unknown tags
   - send through the `Sync.lua` queue
 - `UtuDB` migrations go in `KOS:InitDB`. They must be idempotent and guarded by a version field or a shape check.
+- Synced dumps can't prove who wrote an item, so each client checks dumped items in its own name against `UtuDB.authored` (`KOS:Ledger`). This only detects; it never changes what's merged. Any new way of creating my marks or claims must go through `KOS:Mark`/`Unmark`/`RecordClaim`, or call `LedgerVote`/`LedgerKill`.
 - Personal settings, including mutes, are never synced. Muting never changes bounties or points.
 
 ## UI and assets

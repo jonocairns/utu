@@ -658,6 +658,7 @@ function KOS:InitDB()
             self:Recalc(T)
         end
     end
+    self:TidyLedgers()
 end
 
 -- Drop saved entries too damaged to use (hand-edited or corrupted saved
@@ -959,6 +960,180 @@ function KOS:MergeKill(k)
     self:InvalidateKills()
     self:InvalidateGuildStats()
     return true
+end
+
+------------------------------------------------------------------------
+-- Authorship record: what this character itself marked, unmarked and
+-- claimed, written when it happens. Full-list syncs relay everyone's items
+-- and can't prove who wrote them, so items in my name that my record
+-- doesn't back up are flagged as possible forgeries. Detection only: what
+-- gets merged is unchanged, so lists still converge.
+--   UtuDB.authored[myKey][listKey] = { since = t,
+--     votes = { [targetKey] = { n = full, t, del, note } },  -- latest revision
+--     kills = { [killId] = { by, target, t, v } },           -- lowest value I claimed
+--     flags = { {...}, ... } }                               -- recent flags, newest last
+------------------------------------------------------------------------
+
+KOS.FLAGS_KEPT = 30
+
+-- This character's record for the current guild list (nil outside a guild
+-- or before the guild loads). Created on first use, seeded from my items
+-- already in the list so they don't look unknown.
+function KOS:Ledger()
+    if not self:IsGuildList() then return nil end
+    local list, me, lk = self:List(), self:MyKey(), self:ListKey()
+    self.db.authored = self.db.authored or {}
+    local mine = self.db.authored[me] or {}
+    self.db.authored[me] = mine
+    local L = mine[lk]
+    if L then return L end
+    L = { since = GetServerTime(), votes = {}, kills = {}, flags = {} }
+    mine[lk] = L
+    for key, T in pairs(list.targets) do
+        local v = T.votes and T.votes[me]
+        if v then L.votes[key] = { n = T.n, t = v.t, del = v.del or nil, note = v.note or "" } end
+    end
+    for id, k in pairs(list.kills) do
+        if self:Canonical(k.by) == me then L.kills[id] = { by = k.by, target = k.target, t = k.t, v = k.v } end
+    end
+    return L
+end
+
+function KOS:LedgerVote(key, full, v)
+    local L = self:Ledger()
+    if L then L.votes[key] = { n = full, t = v.t, del = v.del or nil, note = v.note or "" } end
+end
+
+function KOS:LedgerKill(k)
+    local L = self:Ledger()
+    if not L then return end
+    local id = self.KillId(k)
+    local v = math.max(0, math.min(self.MAX_CLAIM, math.floor(tonumber(k.v) or 0)))
+    local e = L.kills[id]
+    -- two of my claims can share an id (same target, same second): keep the
+    -- lowest, which is what merging keeps too
+    if not e or v < e.v then L.kills[id] = { by = k.by, target = k.target, t = k.t, v = v } end
+end
+
+-- On load: re-key every record with the current Canonical (names repaired
+-- or normalised differently by a newer version) and drop claims past the
+-- horizon.
+function KOS:TidyLedgers()
+    local horizon = self:KillHorizon()
+    for _, lists in pairs(self.db.authored or {}) do
+        for _, L in pairs(lists) do
+            local votes, kills = {}, {}
+            for key, e in pairs(L.votes or {}) do
+                local k2 = (type(e.n) == "string" and self:Canonical(e.n)) or key
+                local cur = votes[k2]
+                if type(e.t) == "number" and (not cur or e.t > cur.t) then votes[k2] = e end
+            end
+            for _, e in pairs(L.kills or {}) do
+                if type(e.t) == "number" and e.t >= horizon then
+                    local id = self.KillId(e)
+                    local cur = kills[id]
+                    if not cur or e.v < cur.v then kills[id] = e end
+                end
+            end
+            L.votes, L.kills = votes, kills
+            L.flags = L.flags or {}
+        end
+    end
+end
+
+local flagSeen, flagSeenN, warnTimes, warnSuppressed = {}, 0, {}, 0
+
+local function quoteName(full)
+    local name = KOS:Display(full)
+    return name:find(" ", 1, true) and ('"' .. name .. '"') or name
+end
+
+-- Record a flag and warn me (deduplicated, at most 3 warnings a minute).
+function KOS:FlagForgery(L, sig, entry, text)
+    if flagSeen[sig] then return end
+    if flagSeenN > 500 then wipe(flagSeen); flagSeenN = 0 end
+    flagSeen[sig] = true
+    flagSeenN = flagSeenN + 1
+    entry.at = GetServerTime()
+    L.flags[#L.flags + 1] = entry
+    while #L.flags > self.FLAGS_KEPT do table.remove(L.flags, 1) end
+    local now = GetTime()
+    for i = #warnTimes, 1, -1 do
+        if now - warnTimes[i] > 60 then table.remove(warnTimes, i) end
+    end
+    if #warnTimes >= 3 then
+        warnSuppressed = warnSuppressed + 1
+        return
+    end
+    warnTimes[#warnTimes + 1] = now
+    local more = warnSuppressed > 0 and (" (" .. warnSuppressed .. " more flagged; see /utu sync)") or ""
+    warnSuppressed = 0
+    self:Notify("me", "|cffff8040Possible forgery:|r " .. text .. more)
+end
+
+-- A synced mark (or removal) in my name, checked before it's merged.
+function KOS:AuditVote(it, via)
+    local L = self:Ledger()
+    if not L then return end
+    local e = L.votes[it.key]
+    local del = it.del and true or false
+    local bad
+    if not e then
+        bad = it.t >= L.since
+    elseif it.t > e.t then
+        bad = true
+    elseif it.t == e.t then
+        local a, b = it.note or "", e.note or ""
+        -- notes can be trimmed in transit (or were trimmed when the record
+        -- was seeded), so a prefix either way is the same note
+        bad = del ~= (e.del and true or false) or not (a == b:sub(1, #a) or b == a:sub(1, #b))
+    end
+    if not bad then return end
+    local name, relay = quoteName(it.target), self:Display(via)
+    local text
+    if del and e and not e.del then
+        text = "a sync relayed by " .. relay .. " says you removed your mark on " .. self:Display(it.target)
+            .. ", but your client has no record of that. If that wasn't you on another computer and you still want the mark, re-add it: /utu add " .. name
+    else
+        text = "a sync relayed by " .. relay .. " has a mark in your name on " .. self:Display(it.target)
+            .. " that your client has no record of. If that wasn't you on another computer, remove it with /utu rm " .. name
+    end
+    self:FlagForgery(L, table.concat({ "v", it.key, it.t, del and 1 or 0, it.note or "" }, "|"),
+        { kind = "mark", target = it.target, t = it.t, del = del or nil, via = via }, text)
+end
+
+-- A synced bounty claim in my name, checked before it's merged.
+function KOS:AuditKill(it, via)
+    local L = self:Ledger()
+    if not L or it.t < self:KillHorizon() then return end
+    local id = self.KillId(it)
+    local e = L.kills[id]
+    local relay = self:Display(via)
+    if not e then
+        if it.t < L.since then return end
+        self:FlagForgery(L, "k|" .. id .. "|" .. it.v, { kind = "claim", target = it.target, t = it.t, v = it.v, via = via },
+            "a sync relayed by " .. relay .. " has a " .. it.v .. "-point bounty claim in your name on " .. self:Display(it.target)
+            .. " that you never made. If that wasn't you on another computer, ask an officer to strike it (/utu claims).")
+    elseif it.v < e.v then
+        self:FlagForgery(L, "k|" .. id .. "|" .. it.v, { kind = "lowered", target = it.target, t = it.t, v = it.v, was = e.v, via = via },
+            "a sync relayed by " .. relay .. " lowers your claim on " .. self:Display(it.target) .. " from " .. e.v .. " to "
+            .. it.v .. " points. Everyone keeps the lower value, so tell an officer.")
+    end
+end
+
+-- Lines for /utu sync.
+function KOS:FlagLines()
+    local L = self:Ledger()
+    local out = {}
+    if not L then return out end
+    for i = #L.flags, 1, -1 do
+        local f = L.flags[i]
+        local what = (f.kind == "claim" and ("claim of " .. tostring(f.v) .. " pts on "))
+            or (f.kind == "lowered" and ("claim lowered to " .. tostring(f.v) .. " pts on "))
+            or (f.del and "removal of your mark on ") or "mark on "
+        out[#out + 1] = date("%d %b %H:%M", f.at or 0) .. ": " .. what .. self:Display(f.target) .. ", relayed by " .. self:Display(f.via)
+    end
+    return out
 end
 
 -- Which guild a target is in. Newest observation wins.
@@ -1410,6 +1585,7 @@ function KOS:Mark(name, note, guid, class)
         t = self:Now(old and old.t, T.cleared and T.cleared.t),
     }
     T.votes[self:MyKey()] = v
+    self:LedgerVote(key, full, v)
     if guid and not T.guid then T.guid = guid end
     if class and not T.class then T.class = class end
     self:Recalc(T)
@@ -1431,6 +1607,7 @@ function KOS:Unmark(name)
     if not old or old.del then self:Print("You haven't marked", tostring(name) .. "."); return end
     local v = { by = self:MyName(), note = "", t = self:Now(old.t), del = true }
     T.votes[self:MyKey()] = v
+    self:LedgerVote(key, T.n, v)
     self:Recalc(T)
     if ns.Sync then ns.Sync:BroadcastVote(T, v) end
     self:Print("Removed your mark on", self:Display(T.n) .. (T.on and (" (still " .. self:BountyTag(T) .. ")") or "."))
@@ -1717,6 +1894,7 @@ end
 function KOS:RecordClaim(k, message)
     local before = self:PointsOf(self:MyName())
     local badgesBefore = self:BadgeSet(self:MyName())
+    self:LedgerKill(k)
     if not self:MergeKill(k) then return false end
     if ns.Sync then ns.Sync:BroadcastKill(k) end
     local after = self:PointsOf(self:MyName())

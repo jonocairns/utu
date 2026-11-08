@@ -143,6 +143,7 @@ local base = {
     GetTime = function() return H.now end,
     GetServerTime = function() return math.floor(H.serverTime) end,
     time = function() return math.floor(H.serverTime) end,
+    date = function(fmt, t) return os.date(fmt, t or math.floor(H.serverTime)) end,
     C_Timer = {
         After = function(d, fn) addTimer(d, fn) end,
         NewTimer = function(d, fn) return addTimer(d, fn) end,
