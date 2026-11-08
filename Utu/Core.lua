@@ -427,7 +427,7 @@ local DIRS = { "E", "SE", "S", "SW", "W", "NW", "N", "NE" }
 -- we're on different maps or the position is unknown.
 function KOS:DistanceTo(map, x, y)
     local myMap, mx, my = self:MyPosition()
-    if not myMap or not map or myMap ~= map or not x then return nil end
+    if not myMap or not map or myMap ~= map or not x or not y then return nil end
     local ax, ay = toYards(map, mx, my)
     local bx, by = toYards(map, x, y)
     local dist
@@ -439,6 +439,7 @@ function KOS:DistanceTo(map, x, y)
     -- map y grows southwards
     local angle = math.deg(math.atan2(y - my, x - mx))
     local dir = DIRS[(math.floor((angle + 22.5) / 45) % 8) + 1]
+    if dist ~= dist or not dir then return nil end
     return dist, dir
 end
 
@@ -540,7 +541,10 @@ function KOS:Canonical(name)
     if n == "" or #n > (multi and 36 or 24) or n:find("[%d%p%c]") then return nil end
     if r and #r > 40 then return nil end
     if r and r ~= "" then
-        r = r:gsub("[%s%-']", "")
+        -- realms are letters and digits ("CAMWOWAU1Realm2PvP"); dropping
+        -- everything else also keeps UI escape codes (|c, |T, |H) out of names
+        r = r:gsub("[%s%p%c]", "")
+        if r == "" then return nil end
     else
         r = self:MyRealm()
     end
@@ -647,11 +651,44 @@ function KOS:InitDB()
         list.kills = list.kills or {}
         list.struck = list.struck or {}
         list.deaths = list.deaths or {}
+        self:DropDamaged(list)
         if self:ForeverNames() then self:RepairNames(list) end
         for _, T in pairs(list.targets) do
             T.votes = T.votes or {}
             self:Recalc(T)
         end
+    end
+end
+
+-- Drop saved entries too damaged to use (hand-edited or corrupted saved
+-- data), so one bad record can't stop the addon loading.
+function KOS:DropDamaged(list)
+    local function ok(x, ...)
+        if type(x) ~= "table" or type(x.t) ~= "number" or x.t ~= x.t then return false end
+        for i = 1, select("#", ...) do
+            if type(x[select(i, ...)]) ~= "string" then return false end
+        end
+        return true
+    end
+    for key, T in pairs(list.targets) do
+        if type(T) ~= "table" or type(T.n) ~= "string" then
+            list.targets[key] = nil
+        else
+            if type(T.votes) ~= "table" then T.votes = {} end
+            for vk, v in pairs(T.votes) do
+                if not ok(v, "by") then T.votes[vk] = nil end
+            end
+            if T.cleared ~= nil and not ok(T.cleared, "by") then T.cleared = nil end
+        end
+    end
+    for id, k in pairs(list.kills) do
+        if not ok(k, "by", "target") then list.kills[id] = nil end
+    end
+    for id, d in pairs(list.deaths) do
+        if not ok(d, "victim", "killer") then list.deaths[id] = nil end
+    end
+    for id, x in pairs(list.struck) do
+        if type(x) ~= "table" then list.struck[id] = nil end
     end
 end
 
@@ -789,7 +826,7 @@ function KOS:Recalc(T)
         end
     end
     T.on = on
-    self:InvalidateGuildStats()
+    self:InvalidateGuildStats(true)
 end
 
 function KOS:RecalcAll()
@@ -1318,6 +1355,10 @@ end
 function KOS:SetGuildRule(tag, value)
     if not self:CanEditRules() then
         self:Print("You don't have permission to edit the guild information.")
+        return false
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        self:Print("Can't change guild rules in combat.")
         return false
     end
     local info = self:GuildInfoText()
@@ -1871,10 +1912,12 @@ end
 function KOS:GuildOfGUID(guid) return guid and guidGuild[guid] end
 
 local guildStats
-function KOS:InvalidateGuildStats()
+-- keepGanks: the caller didn't change any deaths (Recalc), so the gank
+-- index can stay; rebuilding it per target made RecalcAll quadratic.
+function KOS:InvalidateGuildStats(keepGanks)
     guildStats = nil
     topAt = -100
-    gankIndex = nil
+    if not keepGanks then gankIndex = nil end
     scoreVersion = scoreVersion + 1
 end
 

@@ -1630,5 +1630,60 @@ test("what's new: shown once after an update, never on a fresh install", functio
     eq(newsLines(a), before + 1)
 end)
 
+test("hostile sync input: future or odd timestamps, escape codes, bad numbers", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local K, now = a.KOS, math.floor(H.serverTime)
+    local function from(c, msg) H.fire(c, "CHAT_MSG_ADDON", K.PREFIX, msg, "GUILD", "Bob-Forever") end
+    -- a claim dated far in the future (or not a number at all) is dropped
+    for _, t in ipairs({ "1e999", "9999999999", tostring(now + 7200), "123.5", "nan", "-5" }) do
+        from(a, "S\tk\tGankdude-Forever\tBob-Forever\t" .. t .. "\t500\t\t\t\t")
+    end
+    eq((K:PointsOf("Bob-Forever")), 0, "no claim accepted")
+    eq(K.Sync.stamp(tostring(now + 60)), now + 60, "a little ahead is fine (lag)")
+    -- marks too
+    from(a, "S\tv\tGankdude-Forever\tBob-Forever\t9999999999\t0\t\t\t")
+    eq(K:GetTarget("gankdude-forever"), nil)
+    -- escape codes in the realm part never reach the UI
+    local key, full = K:Canonical("Gankdude-|cff00ff00Boss|r")
+    assert(not full:find("|", 1, true), full)
+    eq(key, "gankdude-cff00ff00bossr")
+    eq(K:Canonical("Gankdude-|||"), nil)
+    -- a help call with broken coordinates doesn't error
+    from(a, "A\tGankdude-Forever\tElwynn Forest\t1429\tnan\t0.5\tt")
+    from(a, "A\tOtherguy-Forever\tElwynn Forest\t1429\t1e999\t\tt")
+    from(a, "O\tGankdude-Forever\tAlice-Forever\t1e999")
+    -- a junk version string isn't stored or printed
+    from(a, "H\tabc\t3\t2\t|cffff0000haha|r")
+    H.slash(a, "sync")
+    for _, l in ipairs(a.chat) do assert(not l:find("haha", 1, true), l) end
+    local e = a.db.diag and a.db.diag.errors
+    eq(e and #e or 0, 0, "no handler errors: " .. tostring(e and e[1] and e[1].msg))
+end)
+
+test("damaged saved data is dropped instead of stopping the addon loading", function()
+    local now = math.floor(H.serverTime)
+    local db = { lists = { ["Gankbusters-Forever"] = {
+        targets = {
+            ["good-forever"] = { n = "Good-Forever", votes = { ["bob-forever"] = { by = "Bob-Forever", t = now - 100, note = "" } } },
+            ["bad-forever"] = { n = "Bad-Forever", votes = { ["bob-forever"] = { by = "Bob-Forever", note = "no time" }, x = "junk" } },
+            ["junk"] = "not a table",
+        },
+        kills = { k1 = { by = "Bob-Forever" }, k2 = "junk" },
+        deaths = { d1 = { victim = "Bob-Forever", t = now } },
+        struck = { s1 = 5 },
+    } } }
+    local a = H.newClient("Alice", { db = db })
+    H.advance(20)
+    local e = a.db.diag and a.db.diag.errors
+    eq(e and #e or 0, 0, "loaded: " .. tostring(e and e[1] and e[1].msg))
+    assert(a.env.SlashCmdList.UTU, "slash commands registered")
+    local list = db.lists["Gankbusters-Forever"]
+    eq(list.targets.junk, nil)
+    eq(next(list.targets["bad-forever"].votes), nil, "bad votes dropped")
+    eq(list.targets["good-forever"].on, true, "good marks kept")
+    eq(next(list.kills), nil); eq(next(list.deaths), nil); eq(next(list.struck), nil)
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

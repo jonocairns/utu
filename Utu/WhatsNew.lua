@@ -1,6 +1,11 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.7.7", {
+        "|cffffd100Harder to abuse:|r Utu now ignores synced marks and claims dated in the future, and names can't carry colours, icons or links into other players' chat.",
+        "A damaged saved list no longer stops Utu loading; the broken entries are dropped.",
+        "Faster recounts for guilds with a long gank history, and a few rare errors fixed.",
+    } },
     { "0.7.6", {
         "Guildies hear about a marked player again when they turn up after a few minutes away, even though you only get one warning per zone.",
         "Seeing a marked player while resting or in a battleground no longer uses up your warning for that zone.",

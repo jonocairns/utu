@@ -101,13 +101,31 @@ local function encodeItem(kind, a, b)
     end
 end
 
+-- A timestamp from another client: a whole number of seconds, not in the
+-- future (server time is shared, so an hour covers any lag). Anything else
+-- could make a mark or claim count forever.
+local MAX_AHEAD = 3600
+
+-- A finite number within +-limit (coordinates, distances), else nil.
+local function finite(f, limit)
+    local n = tonumber(f)
+    if not n or n ~= n or n > limit or n < -limit then return nil end
+    return n
+end
+local function stamp(f)
+    local t = tonumber(f)
+    if not t or t ~= t or t < 0 or t ~= math.floor(t) or t > GetServerTime() + MAX_AHEAD then return nil end
+    return t
+end
+Sync.stamp = stamp
+
 -- Returns kind, item (normalised) or nil.
 local function decodeItem(s)
     local kind, f1, f2, f3, f4, f5, f6, f7 = strsplit(SEP, s)
     if kind == "v" then
         local key, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
-        local t = tonumber(f3)
+        local t = stamp(f3)
         if not key or not by or not t then return nil end
         return "vote", {
             key = key, target = target, by = by, t = t, del = (f4 == "1") or nil,
@@ -118,13 +136,13 @@ local function decodeItem(s)
     elseif kind == "c" then
         local key, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
-        local t = tonumber(f3)
+        local t = stamp(f3)
         if not key or not by or not t then return nil end
         return "clear", { key = key, target = target, by = by, t = t }
     elseif kind == "k" then
         local _, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
-        local t, v = tonumber(f3), tonumber(f4)
+        local t, v = stamp(f3), tonumber(f4)
         if not target or not by or not t or not v then return nil end
         v = math.max(0, math.min(KOS.MAX_CLAIM, math.floor(v)))
         local g = KOS.CleanText(f6, 64)
@@ -137,24 +155,24 @@ local function decodeItem(s)
     elseif kind == "g" then
         local key, target = KOS:Canonical(f1)
         local g = KOS.CleanText(f2, 64)
-        local t = tonumber(f3)
+        local t = stamp(f3)
         if not key or g == "" or not t then return nil end
         return "guild", { key = key, target = target, guild = g, t = t }
     elseif kind == "d" then
         local _, victim = KOS:Canonical(f1)
         local _, killer = KOS:Canonical(f2)
-        local t = tonumber(f3)
+        local t = stamp(f3)
         if not victim or not killer or not t then return nil end
         return "death", { victim = victim, killer = killer, t = t, by = victim, zone = KOS.CleanText(f4, 60) }
     elseif kind == "x" then
         local _, by = KOS:Canonical(f2)
-        local t = tonumber(f3)
-        local kt = f1 and tonumber(f1:match("|(%d+)$"))
+        local t = stamp(f3)
+        local kt = f1 and stamp(f1:match("|(%d+)$"))
         if not by or not t or not kt then return nil end
         return "strike", { id = f1, by = by, t = t, kt = kt }
     elseif kind == "s" then
         local _, by = KOS:Canonical(f1)
-        local t = tonumber(f2)
+        local t = stamp(f2)
         if not by or not t then return nil end
         return "season", { by = by, t = t }
     end
@@ -570,6 +588,7 @@ function Sync:OnMessage(text, sender, isRetry)
         local ver
         if tag == "H" then ver = select(4, strsplit(SEP, payload)) or "older than 0.6.3"
         elseif tag == "V" then ver = (strsplit(SEP, payload)) end
+        if ver and ver ~= "older than 0.6.3" and not KOS.VersionNum(ver) then ver = "?" end
         heardFrom(senderKey, senderFull, ver)
     end
     if not KOS:IsGuildList() then bump("drop", "not in a guild yet"); return end
@@ -636,7 +655,7 @@ function Sync:OnMessage(text, sender, isRetry)
         local key, full = KOS:Canonical(attacker)
         if not key then return end
         zone = KOS.CleanText(zone, 70)
-        map, x, y = tonumber(map), tonumber(x), tonumber(y)
+        map, x, y = finite(map, 1e7), finite(x, 1e7), finite(y, 1e7)
         local firstCall = not KOS:RescueFor(key)
         KOS:NoteDistress(full, senderFull, map, x, y)
         if not firstCall then return end -- someone already called this one in
@@ -671,7 +690,8 @@ function Sync:OnMessage(text, sender, isRetry)
         local _, victimFull = KOS:Canonical(victim)
         local _, attackerFull = KOS:Canonical(attacker)
         if not victimFull or not attackerFull then return end
-        yards = tonumber(yards)
+        yards = finite(yards, 1e5)
+        yards = yards and math.floor(yards)
         local who = KOS:Display(senderFull)
         if KOS:Canonical(victimFull) == KOS:MyKey() then
             KOS:Notify("me", "|cff40c0ff" .. who .. " is on the way|r" .. (yards and (" (" .. yards .. " yd out)") or "") .. ".")
