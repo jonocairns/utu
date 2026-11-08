@@ -1257,5 +1257,26 @@ test("guild rules are read from a cache in combat, where reading guild info is b
     eq(a.KOS:GuildTag("season"), 4, "out of combat it's read live again")
 end)
 
+test("/kos sync reports what was sent and who has been heard from, with versions", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:Mark("Kind Eyes", "camps the flight path")
+    H.advance(2)
+    H.slash(b, "sync")
+    H.advance(5)
+    a.chat = {}
+    H.slash(a, "sync")
+    assert(H.chatContains(a, "Syncing with guild"), "guild line")
+    assert(H.chatContains(a, "Heard from: Bob (9.9.9"), "Bob's version from his hello")
+    local st = a.KOS.db.diag.sync
+    assert(st.sent >= 2, "sent counted")
+    assert(st.recv >= 1, "received counted")
+    eq(next(st.fail), nil, "no failed sends")
+    assert(not H.chatContains(a, "Registering the message channel"), "a normal registration isn't reported")
+    -- an old client's hello has no addon version
+    H.fire(a, "CHAT_MSG_ADDON", a.KOS.PREFIX, "H\tabc\t3\t2", "GUILD", "Carol-Forever")
+    eq(st.peers["carol-forever"].ver, "older than 0.6.3")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

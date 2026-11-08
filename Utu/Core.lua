@@ -1982,7 +1982,7 @@ local HELP = {
     "/kos claims [Name] - recent bounty claims, with farm/inflation flags",
     "/kos strike N - void claim number N from the last /kos claims (officers)",
     "/kos config - open settings",
-    "/kos sync - sync with online guildies now",
+    "/kos sync - sync with online guildies now, and show who you have heard from",
     "/kos sos - call nearby guildies for help against your target or attacker",
     "/kos probe - test what this client allows (saved for troubleshooting)",
     "/kos test - show a test alert",
@@ -2066,7 +2066,7 @@ local function onSlash(msg)
     elseif cmd == "config" or cmd == "options" or cmd == "settings" then
         KOS:OpenSettings()
     elseif cmd == "sync" then
-        if ns.Sync then ns.Sync:Hello(true) end
+        if ns.Sync then ns.Sync:Status(); ns.Sync:Hello(true) end
     elseif cmd == "probe" then
         KOS:Probe()
     elseif cmd == "sos" then

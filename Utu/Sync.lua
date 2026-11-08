@@ -40,6 +40,37 @@ local Sync = {}
 ns.Sync = Sync
 KOS.Sync = Sync
 
+local function addonVersion()
+    local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    return get and get(ADDON, "Version") or "?"
+end
+
+-- Sync diagnostics, saved to UtuDB.diag.sync and shown by /utu sync.
+-- Counters are for this session; guildies heard from are kept.
+local function stats()
+    local db = KOS.db
+    if not db then return nil end
+    db.diag = db.diag or {}
+    local st = db.diag.sync
+    if not st then st = {}; db.diag.sync = st end
+    st.sent, st.recv = st.sent or 0, st.recv or 0
+    st.fail, st.drop, st.peers = st.fail or {}, st.drop or {}, st.peers or {}
+    return st
+end
+local function bump(field, key)
+    local st = stats()
+    if st then st[field][key] = (st[field][key] or 0) + 1 end
+end
+local function heardFrom(senderKey, senderFull, ver)
+    local st = stats()
+    if not st then return end
+    local p = st.peers[senderKey] or {}
+    p.name, p.t = senderFull, GetServerTime()
+    if ver then p.ver = ver end
+    st.peers[senderKey] = p
+end
+Sync.Stats = stats
+
 local PREFIX = KOS.PREFIX
 local SEP = "\t"
 local MAX_MSG = 255
@@ -171,9 +202,15 @@ end
 local function sendRaw(msg)
     if #msg > MAX_MSG then return true end -- can't ever send; itemMsg should have prevented this
     local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, "GUILD")
-    if not ok then return true end
+    if not ok then bump("fail", "error"); return true end
     if res == false then return false end -- older clients: false = throttled
-    if type(res) == "number" and res ~= 0 then return not THROTTLED[res] end
+    if type(res) == "number" and res ~= 0 then
+        if THROTTLED[res] then return false end
+        bump("fail", "code " .. res)
+        return true
+    end
+    local st = stats()
+    if st then st.sent = st.sent + 1 end
     return true
 end
 
@@ -255,7 +292,7 @@ function Sync:Hello(manual)
         return
     end
     local digest, count = KOS:Digest()
-    enqueue(hi, join("H", digest, count, VERSION))
+    enqueue(hi, join("H", digest, count, VERSION, addonVersion()))
     self.helloSent = true
     if manual then
         KOS:Print(string.format("Asked online guildies to compare lists (%d items, fingerprint %s).", count, digest))
@@ -473,10 +510,18 @@ end
 
 function Sync:OnMessage(text, sender, isRetry)
     local senderKey, senderFull = KOS:Canonical(sender)
-    if not senderKey or senderKey == KOS:MyKey() then return end
-    if not KOS:IsGuildList() then return end
+    if not senderKey then bump("drop", "bad sender name"); return end
+    if senderKey == KOS:MyKey() then return end
     local tag, payload = text:match("^(%u)\t(.*)$")
-    if not tag then return end
+    if not isRetry then
+        local st = stats()
+        if st then st.recv = st.recv + 1 end
+        local ver
+        if tag == "H" then ver = select(4, strsplit(SEP, payload)) or "older than 0.6.3" end
+        heardFrom(senderKey, senderFull, ver)
+    end
+    if not KOS:IsGuildList() then bump("drop", "not in a guild yet"); return end
+    if not tag then bump("drop", "unreadable"); return end
 
     if tag == "H" then
         local digest = strsplit(SEP, payload)
@@ -487,9 +532,9 @@ function Sync:OnMessage(text, sender, isRetry)
 
     elseif tag == "S" then
         local kind, it = decodeItem(payload)
-        if not kind then return end
-        if not isRetry and deferIfUnknown(kind, senderFull, text, sender) then return end
-        if not allowedLive(kind, it, senderKey, senderFull) then return end
+        if not kind then bump("drop", "couldn't read item"); return end
+        if not isRetry and deferIfUnknown(kind, senderFull, text, sender) then bump("drop", "waiting for guild roster"); return end
+        if not allowedLive(kind, it, senderKey, senderFull) then bump("drop", "sender's rank can't do that"); return end
         local bandBefore = bandOf(kind, it)
         local pointsBefore = (kind == "kill") and KOS:PointsOf(it.by) or nil
         if applyItem(kind, it) then
@@ -500,7 +545,7 @@ function Sync:OnMessage(text, sender, isRetry)
 
     elseif tag == "D" then
         local kind, it = decodeItem(payload)
-        if not kind then return end
+        if not kind then bump("drop", "couldn't read item"); return end
         local destructive = kind == "clear" or kind == "season" or kind == "strike"
         -- Destructive items only count when a current officer relays them. The
         -- author named inside can't be trusted (anyone could write the GM's
@@ -599,15 +644,25 @@ end
 
 KOS:On("ADDON_LOADED", function(name)
     if name ~= ADDON then return end
-    C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+    local ok, res = pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX)
+    local st = stats()
+    if st then
+        -- new session: reset the counters, keep the guildies heard from
+        st.sent, st.recv, st.fail, st.drop = 0, 0, {}, {}
+        st.prefix = ok and tostring(res) or ("error: " .. tostring(res))
+    end
 end)
 
 KOS:On("GUILD_ROSTER_UPDATE", function() Sync:RetryPending() end)
 
 KOS:On("CHAT_MSG_ADDON", function(prefix, text, channel, sender)
     -- inside instances chat can arrive as secret values; we only sync in the world
-    if KOS.IsSecret(prefix) or KOS.IsSecret(text) or KOS.IsSecret(channel) or KOS.IsSecret(sender) then return end
-    if prefix ~= PREFIX or channel ~= "GUILD" then return end
+    if KOS.IsSecret(prefix) or KOS.IsSecret(text) or KOS.IsSecret(channel) or KOS.IsSecret(sender) then
+        bump("drop", "secret (any addon)")
+        return
+    end
+    if prefix ~= PREFIX then return end
+    if channel ~= "GUILD" then bump("drop", "not guild channel"); return end
     Sync:OnMessage(text, sender)
 end)
 
@@ -653,3 +708,44 @@ KOS:On("PLAYER_GUILD_UPDATE", function()
         C_Timer.After(10, function() if not Sync.helloSent then Sync:Hello() end end)
     end
 end)
+
+------------------------------------------------------------------------
+-- /utu sync: what sync has done this session, then ask guildies to compare.
+------------------------------------------------------------------------
+
+local function countsText(t)
+    local parts = {}
+    for k, n in pairs(t) do parts[#parts + 1] = k .. " x" .. n end
+    table.sort(parts)
+    return table.concat(parts, ", ")
+end
+
+function Sync:Status()
+    local st = stats()
+    if not st then return end
+    local g = KOS:IsGuildList() and KOS:ListKey()
+    KOS:Print(g and ("Syncing with guild " .. KOS:Display(g) .. ".") or "Not in a guild: nothing syncs.")
+    local fails = countsText(st.fail)
+    KOS:Print(string.format("This session: sent %d message%s%s, received %d. Waiting to send: %d.",
+        st.sent, st.sent == 1 and "" or "s", fails ~= "" and (" (failed: " .. fails .. ")") or "",
+        st.recv, self:QueueSize()))
+    local drops = countsText(st.drop)
+    if drops ~= "" then KOS:Print("Ignored: " .. drops .. ".") end
+    if st.prefix and st.prefix ~= "true" and st.prefix ~= "0" and st.prefix ~= "nil" then
+        KOS:Print("Registering the message channel returned " .. st.prefix .. ".")
+    end
+    local peers = {}
+    for _, p in pairs(st.peers) do peers[#peers + 1] = p end
+    table.sort(peers, function(a, b) return (a.t or 0) > (b.t or 0) end)
+    if #peers == 0 then
+        KOS:Print("Not heard from any guildie with the addon yet. They need Utu (or Kill on Sight 0.5.0 or later) and to be online at the same time as you.")
+    else
+        local parts = {}
+        for i = 1, math.min(#peers, 10) do
+            local p = peers[i]
+            parts[#parts + 1] = string.format("%s (%s, %s)", KOS:Display(p.name), p.ver or "version not seen yet", KOS.Ago(p.t))
+        end
+        KOS:Print("Heard from: " .. table.concat(parts, "; ") .. ".")
+        KOS:Print("Versions before 0.5.0 can't receive names with spaces.")
+    end
+end

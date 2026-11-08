@@ -280,6 +280,7 @@ function H.newClient(name, opts)
     end
     env.UnitHealth = function(unit) if unit == "player" then return c.health or 100 end end
     env.GetBuildInfo = function() return "1.60.1", "70862", "Nov 1 2026", 16001 end
+    env.GetAddOnMetadata = function(_, field) if field == "Version" then return c.version or "9.9.9" end end
     env.UnitLevel = function(unit)
         if unit == "player" then return c.level or 60 end
         local u = c.units[unit]
