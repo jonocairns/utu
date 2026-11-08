@@ -6,6 +6,7 @@ ns.KOS = KOS
 _G.Utu = KOS
 
 KOS.PREFIX = "KOS2"
+KOS.HOME_URL = "github.com/jonocairns/utu"
 KOS.NOTE_MAX = 100 -- bytes; keeps one mark inside a single 255-byte addon message
 KOS.DEFAULT_PARDON_RANK = 1 -- without a guild-info tag, GM (0) and rank 1 can pardon
 KOS.SKULL = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8"

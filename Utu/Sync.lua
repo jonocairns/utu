@@ -71,6 +71,7 @@ local function heardFrom(senderKey, senderFull, ver)
 end
 Sync.Stats = stats
 
+
 local PREFIX = KOS.PREFIX
 local SEP = "\t"
 local MAX_MSG = 255
@@ -238,6 +239,46 @@ local function enqueue(q, msg)
 end
 
 function Sync:QueueSize() return #hi + #lo end
+
+------------------------------------------------------------------------
+-- New-version notice. Addons can't reach the internet, so versions travel
+-- with guild sync: hellos carry the sender's version, and a newer client
+-- answers an older client's hello with a "V" message (old clients ignore it).
+------------------------------------------------------------------------
+
+-- "0.6.3" -> a comparable number, or nil
+local function versionNum(v)
+    if type(v) ~= "string" then return nil end
+    local a, b, c = v:match("^(%d+)%.(%d+)%.(%d+)$")
+    if not a then return nil end
+    a, b, c = tonumber(a), tonumber(b), tonumber(c)
+    if a > 99 or b > 999 or c > 999 then return nil end
+    return a * 1000000 + b * 1000 + c
+end
+Sync.versionNum = versionNum
+
+local newestSeen
+local function noteVersion(v)
+    local n, mine = versionNum(v), versionNum(addonVersion())
+    if not n or not mine or n <= mine then return end
+    if newestSeen and versionNum(newestSeen) >= n then return end
+    newestSeen = v
+    KOS:Print("A newer Utu (" .. v .. ") is out; you have " .. addonVersion()
+        .. ". Update it in WowUp, or download it from " .. KOS.HOME_URL .. ".")
+end
+function Sync:NewerVersion() return newestSeen end
+
+local versionReply
+local function maybeReplyVersion(theirVer)
+    local mine, theirs = versionNum(addonVersion()), versionNum(theirVer)
+    if not mine or not theirs or theirs >= mine or versionReply then return end
+    -- one guildie answering is enough: wait a moment, and stand down if
+    -- someone else answers first (see the "V" handler)
+    versionReply = C_Timer.NewTimer(1 + math.random() * 6, function()
+        versionReply = nil
+        enqueue(hi, join("V", addonVersion()))
+    end)
+end
 
 ------------------------------------------------------------------------
 -- Outgoing
@@ -517,18 +558,27 @@ function Sync:OnMessage(text, sender, isRetry)
         local st = stats()
         if st then st.recv = st.recv + 1 end
         local ver
-        if tag == "H" then ver = select(4, strsplit(SEP, payload)) or "older than 0.6.3" end
+        if tag == "H" then ver = select(4, strsplit(SEP, payload)) or "older than 0.6.3"
+        elseif tag == "V" then ver = (strsplit(SEP, payload)) end
         heardFrom(senderKey, senderFull, ver)
     end
     if not KOS:IsGuildList() then bump("drop", "not in a guild yet"); return end
     if not tag then bump("drop", "unreadable"); return end
 
     if tag == "H" then
-        local digest = strsplit(SEP, payload)
+        local digest, _, _, ver = strsplit(SEP, payload)
+        noteVersion(ver)
+        maybeReplyVersion(ver)
         if digest ~= (KOS:Digest()) and self:ShouldAnswer(digest) then
             self.pendingAsk = true
             self:ScheduleDump()
         end
+
+    elseif tag == "V" then
+        local ver = strsplit(SEP, payload)
+        noteVersion(ver)
+        local n, mine = versionNum(ver), versionNum(addonVersion())
+        if versionReply and n and mine and n >= mine then versionReply:Cancel(); versionReply = nil end
 
     elseif tag == "S" then
         local kind, it = decodeItem(payload)

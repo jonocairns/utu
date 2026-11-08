@@ -1278,5 +1278,27 @@ test("/kos sync reports what was sent and who has been heard from, with versions
     eq(st.peers["carol-forever"].ver, "older than 0.6.3")
 end)
 
+test("a guildie on a newer version tells you once when you log in", function()
+    local b = H.newClient("Bob", { version = "0.7.0" })
+    local c = H.newClient("Carol", { version = "0.7.0" })
+    H.advance(30)
+    local before = countSent("V")
+    local a = H.newClient("Alice", { version = "0.6.3" })
+    H.advance(30)
+    eq(countSent("V") - before, 1, "one newer guildie answers; the other stands down")
+    local notices = 0
+    for _, l in ipairs(a.chat) do if l:find("A newer Utu (0.7.0) is out", 1, true) then notices = notices + 1 end end
+    eq(notices, 1, "told once")
+    eq(a.KOS.Sync:NewerVersion(), "0.7.0")
+    eq(b.KOS.Sync:NewerVersion(), nil, "the newer client isn't nagged")
+    -- same version: nobody answers
+    before = countSent("V")
+    H.newClient("Dave", { version = "0.7.0" })
+    H.advance(30)
+    eq(countSent("V") - before, 0)
+    eq(a.KOS.Sync.versionNum("0.10.2") > a.KOS.Sync.versionNum("0.9.9"), true)
+    eq(a.KOS.Sync.versionNum("1.0"), nil)
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

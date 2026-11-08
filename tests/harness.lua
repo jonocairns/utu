@@ -208,6 +208,7 @@ function H.newClient(name, opts)
     local c = { name = name, rank = opts.rank or 5, inGuild = opts.inGuild ~= false, online = true, chat = {}, raidWarnings = {} }
     c.units = {} -- unit token -> { name=, realm=, guid=, class=, player=true }
     c.db = opts.db
+    c.version = opts.version
 
     local env = setmetatable({}, { __index = base })
     env._G = env
