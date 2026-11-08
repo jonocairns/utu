@@ -1,3 +1,5 @@
+<p align="center"><img src="media/utu-logo.png" alt="Utu logo: a pūkana face" width="160"></p>
+
 # Utu
 
 *Utu* is te reo Māori for reciprocity: restoring balance after a wrong.

@@ -437,7 +437,7 @@ function KOS:UpdateMinimapButton()
         launcher = LDB:NewDataObject("Utu", {
             type = "launcher",
             text = "Utu",
-            icon = SKULL,
+            icon = KOS.LOGO,
             OnClick = function(_, button)
                 if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
             end,
