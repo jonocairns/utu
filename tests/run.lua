@@ -1218,5 +1218,28 @@ test("sync holds its messages inside instances and sends them back in the world"
     assert(b.KOS:Lookup("gankdude-forever"), "sent once back outside")
 end)
 
+
+test("forever: a group gank can be reported against several players", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local shown
+    a.KOS.ShowDeathPrompt = function(_, cands, at, zone) shown = { cands = cands, at = at, zone = zone } end
+    a.units.nameplate1 = { name = "Gankone", guid = "Player-1-0101", level = 60, targeting = "player" }
+    a.units.nameplate2 = { name = "Ganktwo", guid = "Player-1-0102", level = 60, targeting = "player" }
+    for i = 1, 2 do H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate" .. i) end
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    a.health = 50; H.fire(a, "UNIT_HEALTH", "player")
+    H.advance(1)
+    H.fire(a, "PLAYER_DEAD")
+    H.advance(1.5)
+    eq(#shown.cands, 2)
+    for _, c in ipairs(shown.cands) do a.KOS:ConfirmKiller(c, shown.at, shown.zone) end
+    H.advance(2)
+    eq(#b.KOS:GanksBy("gankone-forever"), 1)
+    eq(#b.KOS:GanksBy("ganktwo-forever"), 1)
+    assert(b.KOS:Lookup("gankone-forever") and b.KOS:Lookup("ganktwo-forever"), "both marked")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -318,7 +318,8 @@ end
 ------------------------------------------------------------------------
 -- Death prompt: without a combat log we can't tell who landed the killing
 -- blow, so after you die we list the enemy players who were on you and
--- you pick. That records the gank for the guild and marks them.
+-- you pick. Each pick records a gank for the guild and marks them; in a
+-- group gank you can pick several.
 ------------------------------------------------------------------------
 
 local deathPrompt
@@ -337,6 +338,14 @@ local function buildDeathPrompt()
         b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 120, 8) -- third ends at 388; "None" starts at 422
         b:SetScript("OnClick", function(self)
             KOS:ConfirmKiller(self.cand, deathPrompt.at, deathPrompt.zone)
+            self:Disable()
+            self:SetText("Marked")
+            deathPrompt.done:SetText("Done")
+            deathPrompt.left = math.max(deathPrompt.left or 0, 30)
+            -- nobody left to pick: close
+            for _, other in ipairs(deathPrompt.buttons) do
+                if other:IsShown() and other:IsEnabled() then return end
+            end
             deathPrompt:Hide()
         end)
         b:SetScript("OnEnter", function(self)
@@ -358,14 +367,17 @@ local function buildDeathPrompt()
     none:SetPoint("BOTTOMRIGHT", -8, 8)
     none:SetText("None")
     none:SetScript("OnClick", function() deathPrompt:Hide() end)
+    deathPrompt.done = none
 end
 
 function KOS:ShowDeathPrompt(cands, at, zone)
     if not deathPrompt then buildDeathPrompt() end
     deathPrompt.at, deathPrompt.zone = at, zone
+    deathPrompt.done:SetText("None")
     for i, b in ipairs(deathPrompt.buttons) do
         local c = cands[i]
         b.cand = c
+        b:Enable()
         if c then
             local label = self:Display(c.full)
             if #label > 14 then label = self.Utf8Truncate(label, 13) .. "..." end
@@ -375,7 +387,7 @@ function KOS:ShowDeathPrompt(cands, at, zone)
             b:Hide()
         end
     end
-    deathPrompt:Pop("|cffff6060Killed by an enemy player?|r Pick who it was:", 120)
+    deathPrompt:Pop("|cffff6060Killed by enemy players?|r Pick everyone who was in on it:", 120)
 end
 
 ------------------------------------------------------------------------
