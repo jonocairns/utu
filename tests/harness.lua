@@ -1,12 +1,12 @@
 -- Offline test harness: stubs enough of the WoW API to run several
--- Kill on Sight clients side by side on a shared guild message bus.
+-- Utu clients side by side on a shared guild message bus.
 -- Run: lua5.1 tests/run.lua   (from the repo root)
 
 local H = {}
-local ADDON_DIR = (arg and arg[0] and arg[0]:match("^(.*)/tests/") or ".") .. "/KillOnSight/"
+local ADDON_DIR = (arg and arg[0] and arg[0]:match("^(.*)/tests/") or ".") .. "/Utu/"
 -- load order comes from the .toc, like the game
 local FILES = {}
-for line in io.lines(ADDON_DIR .. "KillOnSight.toc") do
+for line in io.lines(ADDON_DIR .. "Utu.toc") do
     local f = line:match("^([%w_]+%.lua)%s*$")
     if f then FILES[#FILES + 1] = f end
 end
@@ -218,7 +218,7 @@ function H.newClient(name, opts)
     env.StaticPopupDialogs = {}
     env.StaticPopup_Show = function(which, a1, a2, data) c.lastPopup = { which = which, a1 = a1, data = data } end
     env.SlashCmdList = {}
-    env.KillOnSightDB = c.db
+    env.UtuDB = c.db
     env.CreateFrame = function() return mockObject() end
     env.GameTooltip = mockObject()
 
@@ -319,18 +319,18 @@ function H.newClient(name, opts)
     for _, f in ipairs(FILES) do
         local chunk = assert(loadfile(ADDON_DIR .. f))
         setfenv(chunk, env)
-        chunk("KillOnSight", ns)
+        chunk("Utu", ns)
     end
     c.KOS = ns.KOS
     c.Sync = ns.Sync
     H.clients[#H.clients + 1] = c
 
-    H.fire(c, "ADDON_LOADED", "KillOnSight")
+    H.fire(c, "ADDON_LOADED", "Utu")
     H.fire(c, "PLAYER_LOGIN")
     H.fire(c, "PLAYER_ENTERING_WORLD", true, false)
     -- the server pushes roster updates to everyone when a member logs in
     for _, other in ipairs(H.clients) do H.fire(other, "GUILD_ROSTER_UPDATE") end
-    c.db = env.KillOnSightDB
+    c.db = env.UtuDB
     return c
 end
 
@@ -340,14 +340,14 @@ function H.fire(c, event, ...)
     f.scripts.OnEvent(f, event, ...)
 end
 
-function H.slash(c, msg) c.env.SlashCmdList.KILLONSIGHT(msg) end
+function H.slash(c, msg) c.env.SlashCmdList.UTU(msg) end
 
 function H.logout(c) c.online = false end
 
 -- A client logs back in: fresh Lua state, same SavedVariables.
 function H.relogin(c)
     for i, x in ipairs(H.clients) do if x == c then table.remove(H.clients, i) break end end
-    return H.newClient(c.name, { rank = c.rank, db = c.env.KillOnSightDB })
+    return H.newClient(c.name, { rank = c.rank, db = c.env.UtuDB })
 end
 
 function H.chatContains(c, needle)

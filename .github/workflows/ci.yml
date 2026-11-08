@@ -26,11 +26,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check tag matches toc version
         run: |
-          toc=$(sed -n 's/^## Version: *//p' KillOnSight/KillOnSight.toc | tr -d '\r')
+          toc=$(sed -n 's/^## Version: *//p' Utu/Utu.toc | tr -d '\r')
           [ "v$toc" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME doesn't match toc version $toc"; exit 1; }
       - name: Build
         run: ./build.sh
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Kill on Sight $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Utu $GITHUB_REF_NAME" --generate-notes

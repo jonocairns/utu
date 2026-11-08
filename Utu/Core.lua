@@ -1,9 +1,9 @@
--- Kill on Sight: core data model, names, bounties, permissions, slash commands.
+-- Utu: core data model, names, bounties, permissions, slash commands.
 local ADDON, ns = ...
 
 local KOS = {}
 ns.KOS = KOS
-_G.KillOnSight = KOS
+_G.Utu = KOS
 
 KOS.PREFIX = "KOS2"
 KOS.NOTE_MAX = 100 -- bytes; keeps one mark inside a single 255-byte addon message
@@ -171,7 +171,7 @@ function KOS:Print(...)
         local s = tostring((select(i, ...)))
         if s ~= "" then parts[#parts + 1] = s end
     end
-    DEFAULT_CHAT_FRAME:AddMessage("|cffff3333Kill on Sight|r: " .. table.concat(parts, " "))
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff3333Utu|r: " .. table.concat(parts, " "))
 end
 
 -- Trim a string to at most `max` bytes without splitting a UTF-8 character.
@@ -455,8 +455,8 @@ end
 ------------------------------------------------------------------------
 
 function KOS:InitDB()
-    KillOnSightDB = KillOnSightDB or {}
-    local db = KillOnSightDB
+    UtuDB = UtuDB or {}
+    local db = UtuDB
     db.lists = db.lists or {}
     db.charGuild = db.charGuild or {}
     db.settings = db.settings or {}
@@ -1811,7 +1811,7 @@ function KOS:AutoMark(killerFull, guid, class, zone, levels)
     end
 end
 
-StaticPopupDialogs["KILLONSIGHT_SEASON"] = {
+StaticPopupDialogs["UTU_SEASON"] = {
     text = "Start a new season now?\nThe leaderboard starts fresh for the whole guild. Past claims stay in the history.",
     button1 = YES or "Yes",
     button2 = NO or "No",
@@ -1835,8 +1835,8 @@ end
 
 local function popupEditBox(p) return p.editBox or p.EditBox end
 
-StaticPopupDialogs["KILLONSIGHT_NOTE"] = {
-    text = "Kill on Sight: %s\nYour note (optional):",
+StaticPopupDialogs["UTU_NOTE"] = {
+    text = "Mark %s as Kill on Sight\nYour note (optional):",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = true,
@@ -1866,8 +1866,8 @@ StaticPopupDialogs["KILLONSIGHT_NOTE"] = {
     EditBoxOnEscapePressed = function(eb) eb:GetParent():Hide() end,
 }
 
-StaticPopupDialogs["KILLONSIGHT_ADDNAME"] = {
-    text = "Kill on Sight: character name to mark",
+StaticPopupDialogs["UTU_ADDNAME"] = {
+    text = "Utu: character name to mark",
     button1 = ACCEPT or "Accept",
     button2 = CANCEL or "Cancel",
     hasEditBox = true,
@@ -1889,7 +1889,7 @@ StaticPopupDialogs["KILLONSIGHT_ADDNAME"] = {
     EditBoxOnEscapePressed = function(eb) eb:GetParent():Hide() end,
 }
 
-StaticPopupDialogs["KILLONSIGHT_UNMARK"] = {
+StaticPopupDialogs["UTU_UNMARK"] = {
     text = "Remove your mark on %s?",
     button1 = YES or "Yes",
     button2 = NO or "No",
@@ -1897,7 +1897,7 @@ StaticPopupDialogs["KILLONSIGHT_UNMARK"] = {
     OnAccept = function(self) KOS:Unmark(self.data) end,
 }
 
-StaticPopupDialogs["KILLONSIGHT_PARDON"] = {
+StaticPopupDialogs["UTU_PARDON"] = {
     text = "Pardon %s?\nThis clears every guildie's mark on them.",
     button1 = YES or "Yes",
     button2 = NO or "No",
@@ -1911,7 +1911,7 @@ function KOS:PromptNote(name, guid, class)
     local T = self:GetTarget(key)
     local label = self:Display(full)
     if T and T.on then label = label .. " (" .. self:BountyTag(T) .. ")" end
-    StaticPopup_Show("KILLONSIGHT_NOTE", label, nil, { name = full, guid = guid, class = class })
+    StaticPopup_Show("UTU_NOTE", label, nil, { name = full, guid = guid, class = class })
 end
 
 ------------------------------------------------------------------------
@@ -1937,7 +1937,7 @@ local function setupMenus()
             local guid, class = info and info.guid, info and info.class
             local T = KOS:GetTarget(key)
             root:CreateDivider()
-            root:CreateTitle("Kill on Sight" .. ((T and T.on) and (" - " .. KOS:BountyTag(T)) or ""))
+            root:CreateTitle("Utu" .. ((T and T.on) and (" - " .. KOS:BountyTag(T)) or ""))
             if KOS:MyVote(T) then
                 root:CreateButton("Edit my note", function() KOS:PromptNote(name, guid, class) end)
                 root:CreateButton("Remove my mark", function() KOS:Unmark(name) end)
@@ -1947,7 +1947,7 @@ local function setupMenus()
             end
             if T and T.on and KOS:CanPardon(KOS:MyName()) then
                 root:CreateButton("Pardon (clear all marks)", function()
-                    StaticPopup_Show("KILLONSIGHT_PARDON", KOS:Display(T.n), nil, T.n)
+                    StaticPopup_Show("UTU_PARDON", KOS:Display(T.n), nil, T.n)
                 end)
             end
         end)
@@ -2051,7 +2051,7 @@ local function onSlash(msg)
         KOS:Strike(r.id)
         KOS.lastClaims = nil
     elseif cmd == "season" then
-        if KOS:CanPardon(KOS:MyName()) then StaticPopup_Show("KILLONSIGHT_SEASON")
+        if KOS:CanPardon(KOS:MyName()) then StaticPopup_Show("UTU_SEASON")
         else KOS:NewSeason() end -- prints the permission message
     elseif cmd == "config" or cmd == "options" or cmd == "settings" then
         KOS:OpenSettings()
@@ -2119,7 +2119,7 @@ function KOS:On(event, fn)
     return ok
 end
 
--- Each handler runs protected: an error is saved to KillOnSightDB.diag and
+-- Each handler runs protected: an error is saved to UtuDB.diag and
 -- passed on to the normal error handler, and the other handlers still run.
 local current, currentEvent, args, nargs = nil, nil, {}, 0
 local function runCurrent() return current(unpack(args, 1, nargs)) end
@@ -2159,29 +2159,29 @@ frame:SetScript("OnEvent", function(_, event, ...) dispatch(event, ...) end)
 
 -- Key bindings (Bindings.xml) and the addon compartment (the addons
 -- dropdown by the minimap) call these globals.
-BINDING_HEADER_KILLONSIGHT = "Kill on Sight"
-BINDING_NAME_KILLONSIGHT_TOGGLE = "Open Kill on Sight"
-BINDING_NAME_KILLONSIGHT_HELP = "Call guildies for help"
-function KillOnSight_Toggle() if KOS.db then KOS:ToggleUI() end end
-function KillOnSight_Help() if KOS.db then KOS:ManualHelp() end end
-function KillOnSight_OnAddonCompartmentClick(_, button)
+BINDING_HEADER_UTU = "Utu"
+BINDING_NAME_UTU_TOGGLE = "Open Utu"
+BINDING_NAME_UTU_HELP = "Call guildies for help"
+function Utu_Toggle() if KOS.db then KOS:ToggleUI() end end
+function Utu_Help() if KOS.db then KOS:ManualHelp() end end
+function Utu_OnAddonCompartmentClick(_, button)
     if not KOS.db then return end
     if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
 end
-function KillOnSight_OnAddonCompartmentEnter(_, frame)
+function Utu_OnAddonCompartmentEnter(_, frame)
     if not GameTooltip or not frame then return end
     GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
-    GameTooltip:AddLine("Kill on Sight")
+    GameTooltip:AddLine("Utu")
     GameTooltip:AddLine("Left-click: open the list. Right-click: settings.", 1, 1, 1)
     GameTooltip:Show()
 end
-function KillOnSight_OnAddonCompartmentLeave() if GameTooltip then GameTooltip:Hide() end end
+function Utu_OnAddonCompartmentLeave() if GameTooltip then GameTooltip:Hide() end end
 
 KOS:On("ADDON_LOADED", function(name)
     if name ~= ADDON then return end
     KOS:InitDB()
-    SLASH_KILLONSIGHT1, SLASH_KILLONSIGHT2 = "/kos", "/killonsight"
-    SlashCmdList.KILLONSIGHT = onSlash
+    SLASH_UTU1, SLASH_UTU2 = "/utu", "/kos"
+    SlashCmdList.UTU = onSlash
     setupMenus()
 end)
 

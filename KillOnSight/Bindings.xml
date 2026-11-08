@@ -1,8 +1,0 @@
-<Bindings>
-	<Binding name="KILLONSIGHT_TOGGLE" header="KILLONSIGHT" category="ADDONS">
-		KillOnSight_Toggle()
-	</Binding>
-	<Binding name="KILLONSIGHT_HELP" category="ADDONS">
-		KillOnSight_Help()
-	</Binding>
-</Bindings>

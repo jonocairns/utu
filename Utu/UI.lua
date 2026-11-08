@@ -1,4 +1,4 @@
--- Kill on Sight: main window. Everything is doable from here; slash
+-- Utu: main window. Everything is doable from here; slash
 -- commands are just shortcuts.
 --   Wanted    the list, with an add form and a detail pane per player
 --   Hunters   your rank card + the season leaderboard
@@ -303,7 +303,7 @@ local function buildWanted()
     d.unmark:SetPoint("LEFT", d.save, "RIGHT", 6, 0)
     d.pardon = Button(d, "Pardon (clear all marks)", DETAIL_W - 24, function()
         local T = selectedTarget()
-        if T then StaticPopup_Show("KILLONSIGHT_PARDON", KOS:Display(T.n), nil, T.n) end
+        if T then StaticPopup_Show("UTU_PARDON", KOS:Display(T.n), nil, T.n) end
     end)
     d.pardon:SetPoint("BOTTOMLEFT", 12, 6)
     d.placeholder:SetText("Select a player to see their bounty,\nmarks and history.")
@@ -725,7 +725,7 @@ local function buildOfficer()
     officer.season = Text(p, "GameFontHighlightSmall")
     officer.season:SetPoint("TOPLEFT", x, y - 20)
     officer.season:SetWidth(360)
-    officer.newSeason = Button(p, "Start next season now", 170, function() StaticPopup_Show("KILLONSIGHT_SEASON") end)
+    officer.newSeason = Button(p, "Start next season now", 170, function() StaticPopup_Show("UTU_SEASON") end)
     officer.newSeason:SetPoint("TOPLEFT", x, y - 40)
 
     y = y - 76
@@ -761,7 +761,7 @@ local function buildOfficer()
         r.sub:SetPoint("BOTTOMLEFT", 6, 4)
         r.strike = Button(r, "Strike", 60, function(b)
             local c = b:GetParent().item
-            StaticPopup_Show("KILLONSIGHT_STRIKE", KOS:Display(c.k.by) .. " on " .. KOS:Display(c.k.target), nil, c.id)
+            StaticPopup_Show("UTU_STRIKE", KOS:Display(c.k.by) .. " on " .. KOS:Display(c.k.target), nil, c.id)
         end)
         r.strike:SetPoint("RIGHT", -4, 0)
     end, function(r, c)
@@ -773,7 +773,7 @@ local function buildOfficer()
     officer.claims.empty:SetText("No claims to review.")
 end
 
-StaticPopupDialogs["KILLONSIGHT_STRIKE"] = {
+StaticPopupDialogs["UTU_STRIKE"] = {
     text = "Strike %s's claim?\nIt's removed from the leaderboard for everyone.",
     button1 = YES or "Yes",
     button2 = NO or "No",
@@ -857,7 +857,7 @@ local function layoutTabs()
 end
 
 local function build()
-    f = CreateFrame("Frame", "KillOnSightFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    f = CreateFrame("Frame", "UtuFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
     f:SetSize(W, H)
     f:SetPoint("CENTER")
     f:SetFrameStrata("HIGH")
@@ -875,7 +875,7 @@ local function build()
         f:SetBackdropBorderColor(0, 0, 0, 1)
     end
     f:Hide()
-    tinsert(UISpecialFrames, "KillOnSightFrame")
+    tinsert(UISpecialFrames, "UtuFrame")
 
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetTexture(KOS.SKULL)
@@ -931,7 +931,7 @@ function KOS:RefreshUI()
         if k ~= current then b.label:SetTextColor(0.6, 0.6, 0.6) else b.label:SetTextColor(1, 1, 1) end
     end
     local g = IsInGuild() and GetGuildInfo("player")
-    f.title:SetText("Kill on Sight  |cff888888" .. (g and ("<" .. g .. ">") or "personal list") .. "|r")
+    f.title:SetText("Utu  |cff888888" .. (g and ("<" .. g .. ">") or "personal list") .. "|r")
     local q = self.Sync and self.Sync:QueueSize() or 0
     f.footer:SetText(q > 0 and ("|cffffd100Syncing with guildies (" .. q .. " left)|r")
         or (self:IsGuildList() and "Synced with online guildies" or "Not in a guild: this list is just yours"))

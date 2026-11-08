@@ -1,0 +1,8 @@
+<Bindings>
+	<Binding name="UTU_TOGGLE" header="UTU" category="ADDONS">
+		Utu_Toggle()
+	</Binding>
+	<Binding name="UTU_HELP" category="ADDONS">
+		Utu_Help()
+	</Binding>
+</Bindings>

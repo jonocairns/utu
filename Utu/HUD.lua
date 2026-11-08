@@ -1,4 +1,4 @@
--- Kill on Sight: on-screen extras. Screen flash, target-frame badge,
+-- Utu: on-screen extras. Screen flash, target-frame badge,
 -- "recently spotted" tracker and minimap button.
 local ADDON, ns = ...
 local KOS = ns.KOS
@@ -99,7 +99,7 @@ local recent = {} -- key -> { T, at, by, zone }
 local tracker
 
 local function buildTracker()
-    tracker = CreateFrame("Frame", "KillOnSightTracker", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    tracker = CreateFrame("Frame", "UtuTracker", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
     tracker:SetSize(280, 40)
     local pos = KOS.S.trackerPos
     if pos then tracker:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3])
@@ -126,7 +126,7 @@ local function buildTracker()
 
     tracker.title = tracker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     tracker.title:SetPoint("TOPLEFT", 8, -7)
-    tracker.title:SetText("|T" .. SKULL .. ":12|t Kill on Sight - spotted")
+    tracker.title:SetText("|T" .. SKULL .. ":12|t Utu - spotted")
 
     local close = CreateFrame("Button", nil, tracker, "UIPanelCloseButton")
     close:SetSize(20, 20)
@@ -247,7 +247,7 @@ function KOS:CheckZoneThreat()
     local prev = lastThreat[r.zone]
     if prev and GetTime() - prev.at < 600 and r.score <= prev.score then return end
     lastThreat[r.zone] = { at = GetTime(), score = r.score }
-    if not threatToast then threatToast = makeToast("KillOnSightThreat", -120) end
+    if not threatToast then threatToast = makeToast("UtuThreat", -120) end
     threatToast.icon:SetVertexColor(1, r.level >= 2 and 0.3 or 0.82, 0.2)
     threatToast:Pop(self:ThreatText(r), 9)
     self:Notify("nearby", self:ThreatText(r))
@@ -265,7 +265,7 @@ end)
 
 local helpPrompt
 local function buildHelpPrompt()
-    helpPrompt = makeToast("KillOnSightHelp", -170)
+    helpPrompt = makeToast("UtuHelp", -170)
     helpPrompt:SetSize(440, 56)
     helpPrompt:EnableMouse(true)
     helpPrompt.text:ClearAllPoints()
@@ -310,7 +310,7 @@ function KOS:OnResponder(who, yards, forOthers)
         end
         return
     end
-    if not threatToast then threatToast = makeToast("KillOnSightThreat", -120) end
+    if not threatToast then threatToast = makeToast("UtuThreat", -120) end
     threatToast.icon:SetVertexColor(0.25, 0.75, 1)
     threatToast:Pop("|cff40c0ff" .. who .. " is on the way|r" .. (yards and (" - " .. yards .. " yd out") or ""), 6)
 end
@@ -324,7 +324,7 @@ end
 
 local deathPrompt
 local function buildDeathPrompt()
-    deathPrompt = makeToast("KillOnSightDeath", -220)
+    deathPrompt = makeToast("UtuDeath", -220)
     deathPrompt:SetSize(500, 64)
     deathPrompt:EnableMouse(true)
     deathPrompt.icon:SetVertexColor(1, 0.3, 0.2)
@@ -404,7 +404,7 @@ end
 
 local function createMinimapButton()
     if mmButton or not Minimap then return end
-    mmButton = CreateFrame("Button", "KillOnSightMinimapButton", Minimap)
+    mmButton = CreateFrame("Button", "UtuMinimapButton", Minimap)
     mmButton:SetSize(31, 31)
     mmButton:SetFrameStrata("MEDIUM")
     mmButton:SetFrameLevel(8)
@@ -440,7 +440,7 @@ local function createMinimapButton()
     mmButton:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
     mmButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Kill on Sight")
+        GameTooltip:AddLine("Utu")
         local pts = KOS:PointsOf(KOS:MyName())
         GameTooltip:AddLine("You: " .. KOS.RankTag(pts) .. " (" .. pts .. " pts)", 1, 1, 1)
         local r = KOS:ZoneThreat()

@@ -1,4 +1,4 @@
--- Kill on Sight: finding listed players, alerting, bounty claims, auto-marks.
+-- Utu: finding listed players, alerting, bounty claims, auto-marks.
 --
 -- WoW has no "players near me" API, so we watch everything that reveals a
 -- nearby player: nameplates (~40 yd), the combat log, target and mouseover.

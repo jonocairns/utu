@@ -1,20 +1,20 @@
-# Kill on Sight
+# Utu
 
-A guild-run bounty game for open-world PvP, built for WoW: Forever (Classic Era API).
+*Utu* is te reo Māori for reciprocity: restoring balance after a wrong. Here, it's a guild-run kill-on-sight list and bounty game for open-world PvP, built for WoW: Forever.
 
 - **Mark gankers.** Bounties grow with marks and ganks, and cool off when the ganking stops.
 - **Get warned** when a marked player arrives nearby.
 - **Claim kills** for points. Climb 50 hunter ranks each season.
 
-Open it with `/kos`, the minimap button, or the addons dropdown next to the minimap. Everything, settings included, is in the window. Slash commands are just shortcuts.
+Open it with `/utu` (or `/kos`), the minimap button, or the addons dropdown next to the minimap. Everything, settings included, is in the window. Slash commands are just shortcuts.
 
 ## Install
 
-Copy `KillOnSight` into `World of Warcraft/<client>/Interface/AddOns/`.
+Copy `Utu` into `World of Warcraft/<client>/Interface/AddOns/`.
 
-If the addon list shows it as *Incompatible* or *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `KillOnSight.toc`. (Forever 1.60.1 is `16001`.)
+If the addon list shows it as *Incompatible* or *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `Utu.toc`. (Forever 1.60.1 is `16001`.)
 
-If something goes wrong, the addon saves its own errors (and `/kos probe` results) in `WTF/Account/<account>/SavedVariables/KillOnSight.lua` after you log out or `/reload`.
+If something goes wrong, the addon saves its own errors (and `/kos probe` results) in `WTF/Account/<account>/SavedVariables/Utu.lua` after you log out or `/reload`.
 
 **Turn on enemy nameplates (V).** They're the main long-range detection.
 
@@ -27,7 +27,7 @@ If something goes wrong, the addon saves its own errors (and `/kos probe` result
 | **Kill value** | Killing blow pays **5 + 3 × level**. The level leaves out *your* mark and *your* deaths, so you can't farm your own alt or a friend. Points slide to 0 for targets 4–10 levels below you. **+50% each:** Top Bounty (#1 on the list) · revenge (they killed a guildie in the last hour) or rescue (a guildie called for help in the last 3 minutes) · first blood (your first kill of them this season). |
 | **Assists** | Grouped guildies who hit the target in the last 20 seconds get half the base. |
 | **On WoW: Forever** | Forever doesn't give addons the combat log, so: **kills** come from honour gains, and every guildie the game credits with the kill gets the full value (the bounty still drains once per kill). **Who killed you:** after you die, a small prompt lists up to three enemy players who were targeting you. Pick everyone who was in on it: each pick records a gank against them and marks them. **Help calls** go out when a KoS player (or anyone 5+ levels above you) is targeting you while you take damage. Grey kills give no honour, so they don't score. |
-| **Calls for help** | Call by hand with `/kos sos` or a key binding (Key Bindings → AddOns → Kill on Sight). When a KoS player (or anyone 5+ levels above you) attacks you, guildies **within 400 yards in the same zone** get a banner with the distance and direction ("120 yd W") and an **On my way** button. You see who's coming. Kill the attacker within 3 minutes for +50% rescue. Responders who get there (within 150 yd when the attacker dies) earn an assist. The range is a setting: 200/400/800/1500 yd, whole zone, or anywhere. |
+| **Calls for help** | Call by hand with `/kos sos` or a key binding (Key Bindings → AddOns → Utu). When a KoS player (or anyone 5+ levels above you) attacks you, guildies **within 400 yards in the same zone** get a banner with the distance and direction ("120 yd W") and an **On my way** button. You see who's coming. Kill the attacker within 3 minutes for +50% rescue. Responders who get there (within 150 yd when the attacker dies) earn an assist. The range is a setting: 200/400/800/1500 yd, whole zone, or anywhere. |
 | **Defending** | When anyone 5+ levels above a guildie attacks them, the guildie calls for help. Kill the attacker within 3 minutes and you mark them and earn 10 points. |
 | **Hunter ranks** | Season points give a level: Tracker I–V, Scout, Bounty Hunter, Manhunter, Avenger, Revenger, Executioner, Slayer, Warlord, Grim Reaper, then Legend N. |
 | **Badges** | First Blood, Big Game Hunter, Jackpot, Avenger, Guardian, Wingman, Nemesis Slain, Guild Breaker. |

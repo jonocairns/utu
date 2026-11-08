@@ -1,4 +1,4 @@
--- Kill on Sight: personal settings. Built into the main window's Settings
+-- Utu: personal settings. Built into the main window's Settings
 -- tab; the Blizzard AddOns options page just links to it.
 -- Everything here is saved for your account and never shared.
 local ADDON, ns = ...
@@ -174,8 +174,8 @@ function KOS:BuildSettings(parent)
         { { "off", "Feed only" }, { "near", "Nearby" }, { "zone", "Whole zone" }, { "any", "Anywhere" } }, COL2, y)
     y = stepper("helpRange", "\"Nearby\" means within",
         { { 200, "200 yd" }, { 400, "400 yd" }, { 800, "800 yd" }, { 1500, "1500 yd" } }, COL2, y)
-    y = check("announce", "Tell guildies when I spot someone", "Hidden addon message: only guildies with Kill on Sight see it.", COL2, y)
-    y = check("callForHelp", "Call for help when a KoS player attacks me", "Also anyone 5+ levels above you. Guildies nearby get a banner; killing your attacker within 3 minutes earns a rescue bonus. Call by hand with /kos sos or a key binding (Key Bindings > AddOns > Kill on Sight).", COL2, y)
+    y = check("announce", "Tell guildies when I spot someone", "Hidden addon message: only guildies with Utu see it.", COL2, y)
+    y = check("callForHelp", "Call for help when a KoS player attacks me", "Also anyone 5+ levels above you. Guildies nearby get a banner; killing your attacker within 3 minutes earns a rescue bonus. Call by hand with /kos sos or a key binding (Key Bindings > AddOns > Utu).", COL2, y)
     y = check("partyChat", "Post sightings in party/raid chat", "Visible to your group. Max one per player every 5 minutes.", COL2, y)
     y = check("guildChat", "Post sightings in guild chat", "Visible to everyone in the guild. Max one per player every 5 minutes.", COL2, y)
 
@@ -188,14 +188,14 @@ end
 -- Blizzard options page: a launcher for the in-window settings
 ------------------------------------------------------------------------
 
-local stub = CreateFrame("Frame", "KillOnSightOptions")
-stub.name = "Kill on Sight"
+local stub = CreateFrame("Frame", "UtuOptions")
+stub.name = "Utu"
 local title = stub:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
 title:SetPoint("TOPLEFT", 16, -16)
-title:SetText("Kill on Sight")
+title:SetText("Utu")
 local desc = stub:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-desc:SetText("Settings live in the Kill on Sight window, next to the list.")
+desc:SetText("Settings live in the Utu window, next to the list.")
 local open = CreateFrame("Button", nil, stub, "UIPanelButtonTemplate")
 open:SetSize(160, 24)
 open:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -12)

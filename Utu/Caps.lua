@@ -1,4 +1,4 @@
--- Kill on Sight: what this client lets addons do, safe unit reads, and
+-- Utu: what this client lets addons do, safe unit reads, and
 -- diagnostics.
 --
 -- WoW: Forever runs on the Midnight engine, which hides some values from
@@ -110,7 +110,7 @@ end
 
 ------------------------------------------------------------------------
 -- Diagnostics: event counts, samples and errors, saved to
--- KillOnSightDB.diag so they can be read from the SavedVariables file.
+-- UtuDB.diag so they can be read from the SavedVariables file.
 ------------------------------------------------------------------------
 
 KOS.eventCounts = {}
@@ -162,7 +162,7 @@ end
 
 ------------------------------------------------------------------------
 -- /kos probe: test what this client allows and save the results to
--- KillOnSightDB.probe.
+-- UtuDB.probe.
 ------------------------------------------------------------------------
 
 local function describe(v)

@@ -1,4 +1,4 @@
--- Kill on Sight: guild sync over the hidden addon-message channel.
+-- Utu: guild sync over the hidden addon-message channel.
 -- Nothing here is visible in guild chat; it's addon-to-addon traffic.
 --
 -- Wire format: tab-separated, one item per message (<=255 bytes).
