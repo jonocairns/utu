@@ -73,6 +73,8 @@ test("name canonicalisation", function()
     key, full = K:Canonical("  Mietta   Grace ")
     eq(key, "mietta grace-forever"); eq(full, "Mietta Grace-Forever") -- Forever allows spaces
     eq(K:Canonical("kind eyes"), "kind eyes-forever")
+    eq(select(2, K:Canonical("kind eyes")), "Kind Eyes-Forever", "each word capitalised, like the game does")
+    eq(select(2, K:Canonical("MIETTA grace")), "Mietta Grace-Forever")
     eq(K:Canonical("Ab.cd"), nil)
     eq(K:Canonical("x1"), nil)
     eq(K:Display("Gankdude-Forever"), "Gankdude")
@@ -1328,6 +1330,7 @@ test("forever: two-word names the game splits into name and realm are put back t
     eq(T.guid, "Player-1-0P1"); eq(T.class, "ROGUE")
     eq(#K:GanksBy("sqwert sqwert-forever"), 1, "gank re-keyed")
     assert(K:Lookup("kind eyes-camwowau1realm2pvp"), "a realm with digits is a realm")
+    eq(K:Lookup("kind eyes-camwowau1realm2pvp").n, "Kind Eyes-CAMWOWAU1Realm2PvP", "saved lowercase name capitalised")
     eq(K:Canonical("Gankdude-Forever"), "gankdude-forever", "our own realm stays a realm")
     eq(select(2, K:Canonical("Fourty-Shots")), "Fourty Shots-Forever")
 

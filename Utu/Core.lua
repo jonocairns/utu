@@ -427,9 +427,9 @@ function KOS:Canonical(name)
     else
         r = self:MyRealm()
     end
-    -- one-word names: "gankdude" -> "Gankdude". Multi-word names keep the
-    -- case they were given (the key is lowercase either way).
-    if not multi then n = n:sub(1, 1):upper() .. n:sub(2):lower() end
+    -- "gankdude" -> "Gankdude", "kind eyes" -> "Kind Eyes": the game
+    -- capitalises each word of a name (the key is lowercase either way)
+    n = n:gsub("(%S)(%S*)", function(first, rest) return first:upper() .. rest:lower() end)
     local full = n .. "-" .. r
     return full:lower(), full
 end
