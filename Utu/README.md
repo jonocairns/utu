@@ -39,7 +39,7 @@ After that, new versions install themselves while WowUp is running, or click **U
 
 ## Staying out of your way
 
-- You're alerted when a marked player arrives, not the whole time they're around. Several at once become one banner.
+- Each marked player alerts you once per zone visit, and not at all if you marked them while targeting them. Several at once become one banner.
 - Players under bounty Lv 3 don't alert, unless you marked them. Battlegrounds and arenas are quiet.
 - Guild events go to the **Activity** tab. Chat only shows what's about you, near you, or big news.
 - **Mute a guildie** whose marks you don't care about: right-click their name, use **Mute...** under a player's marks, or the **Muted** button in Activity. It's just for you: bounties and points don't change.

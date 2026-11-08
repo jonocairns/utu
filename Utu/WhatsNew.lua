@@ -1,6 +1,11 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.7.5", {
+        "|cffffd100One alert per zone:|r each marked player now warns you once per zone visit, instead of again every time they wander back into view. Leave the zone and come back for a fresh warning.",
+        "Marking the player you're targeting no longer warns you about them straight after.",
+        "Removed the \"Alert again once gone for\" setting.",
+    } },
     { "0.7.4", {
         "|cffffd100What's new in game:|r the first time you log in after Utu updates, chat lists what changed since your last version. /utu news shows it again.",
     } },

@@ -55,6 +55,13 @@ local function jumpDays(days)
     H.advance(31, 1) -- let score caches expire
     for _, c in ipairs(H.clients) do if c.online then c.KOS:RecalcAll(); c.KOS:InvalidateGuildStats() end end
 end
+-- leave the zone and come back: a new zone visit
+local function revisit(c)
+    c.zone = "Duskwood"
+    H.fire(c, "ZONE_CHANGED_NEW_AREA")
+    c.zone = nil
+    H.fire(c, "ZONE_CHANGED_NEW_AREA")
+end
 local function feedHas(c, needle)
     for _, e in ipairs(c.KOS:Activity()) do if e.text:find(needle, 1, true) then return true end end
     return false
@@ -224,7 +231,7 @@ end)
 -- Detection & alerts
 ------------------------------------------------------------------------
 
-test("nameplate detection: alert on arrival, guild noted, re-alert only after they leave", function()
+test("nameplate detection: one alert per zone visit, guild noted", function()
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
     a.KOS:Mark("Gankdude", "ganker")
@@ -243,9 +250,39 @@ test("nameplate detection: alert on arrival, guild noted, re-alert only after th
         H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate3")
     end
     eq(#a.raidWarnings, 1, "no repeats while he hangs around")
-    H.advance(200)
+    H.advance(3600)
     H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate3")
-    eq(#a.raidWarnings, 2, "alerts again when he returns")
+    eq(#a.raidWarnings, 1, "not even an hour later in the same zone")
+    a.units.target = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    eq(#a.raidWarnings, 1, "or when you target him")
+    H.fire(a, "ZONE_CHANGED_NEW_AREA")
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+    eq(#a.raidWarnings, 1, "a subzone change isn't a new visit")
+    revisit(a)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+    eq(#a.raidWarnings, 2, "alerts again on your next visit")
+end)
+
+test("marking the player you're targeting doesn't then alert you about them", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.units.target = { name = "Gankdude", guid = "Player-1-0001", class = "ROGUE" }
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    H.slash(a, "target camps the flight path")
+    eq(active(a), 1)
+    a.units.nameplate1 = a.units.target
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    eq(#a.raidWarnings, 0, "you already know he's there")
+    -- marked by name while he's elsewhere: alerts when he shows up
+    a.KOS:Mark("Otherguy", "")
+    a.units.nameplate2 = { name = "Otherguy", guid = "Player-1-0002" }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate2")
+    eq(#a.raidWarnings, 1)
+    revisit(a)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 2, "and the targeted one alerts on your next visit")
 end)
 
 test("a crowd of KoS players collapses into one summary banner", function()
@@ -287,19 +324,19 @@ test("personal alert settings: min level, my own marks, sources, quiet places", 
     H.fire(b, "PLAYER_TARGET_CHANGED")
     eq(#b.raidWarnings, 1, "but Bob's own grudge always alerts him")
     H.slash(a, "set minLevel 1")
-    H.advance(200)
+    revisit(a)
     H.slash(a, "set srcTarget off")
     H.fire(a, "PLAYER_TARGET_CHANGED")
     eq(#a.raidWarnings, 0, "targeting source disabled")
     H.slash(a, "set srcTarget on")
     H.resting = true
     H.slash(a, "set quietResting on")
-    H.advance(200)
+    revisit(a)
     H.fire(a, "PLAYER_TARGET_CHANGED")
     eq(#a.raidWarnings, 0, "quiet while resting")
     H.resting = false
     H.inInstance = true
-    H.advance(200)
+    revisit(a)
     H.fire(a, "PLAYER_TARGET_CHANGED")
     eq(#a.raidWarnings, 0, "quiet in battlegrounds by default")
 end)
@@ -313,7 +350,7 @@ test("visible party/guild chat posts are opt-in and rate-limited", function()
     H.fire(a, "PLAYER_TARGET_CHANGED")
     eq(a.said, nil, "off by default")
     H.slash(a, "set guildChat on")
-    H.advance(200)
+    revisit(a)
     H.fire(a, "PLAYER_TARGET_CHANGED")
     eq(#a.said, 1)
     assert(a.said[1].msg:find("%[KoS%] Gankdude"), a.said[1].msg)
@@ -904,10 +941,10 @@ test("personal list and slash commands don't error", function()
     eq(active(a), 1)
     eq(#H.sent, 0)
     for _, cmd in ipairs({ "", "list", "list gank", "top", "guilds", "claims", "config", "test", "sync", "help",
-        "set sound pvp", "set cooldown 300", "season", "strike 1" }) do
+        "set sound pvp", "set minLevel 5", "season", "strike 1" }) do
         H.slash(a, cmd)
     end
-    eq(a.KOS.S.sound, "pvp"); eq(a.KOS.S.cooldown, 300)
+    eq(a.KOS.S.sound, "pvp"); eq(a.KOS.S.minLevel, 5)
     a.KOS:Flash(true)
     a.KOS:RefreshTargetBadge()
     H.slash(a, "rm Gankdude")

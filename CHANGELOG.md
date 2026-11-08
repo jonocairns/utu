@@ -5,6 +5,11 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.7.5
+- **One alert per zone:** each marked player now warns you once per zone visit, instead of again every time they wander back into view. Leave the zone and come back for a fresh warning.
+- Marking the player you're targeting no longer warns you about them straight after.
+- Removed the "Alert again once gone for" setting.
+
 ## 0.7.4
 - **What's new in game:** the first time you log in after Utu updates, chat lists what changed since your last version. `/utu news` shows it again.
 

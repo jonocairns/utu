@@ -142,7 +142,6 @@ function KOS:BuildSettings(parent)
     y = stepper("sound", "Sound", sounds, COL1, y, function(v) KOS:PlayAlertSound(v) end)
     y = stepper("minLevel", "Alert from bounty level", range(1, 60, 1, "Lv %d", { 0, "Any" }), COL1, y)
     y = stepper("loudLevel", "Escalate from level", range(5, 60, 5, "Lv %d"), COL1, y)
-    y = stepper("cooldown", "Alert again once gone for", range(60, 900, 60, "%ds"), COL1, y)
     y = y - 4
     y = header("Detect using", COL1, y)
     y = check("srcNameplate", "Nameplates", "The main long-range source. Turn on enemy nameplates (V).", COL1, y)

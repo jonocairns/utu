@@ -50,10 +50,25 @@ local function label(T) return KOS:BountyTag(T) end
 -- Alerts
 ------------------------------------------------------------------------
 
--- Encounters: a player alerts when they *arrive* (not seen for `cooldown`
--- seconds), not every minute they stay near you. Several arrivals at once
--- collapse into one summary banner.
-local lastSeen = {}
+-- Encounters: each player alerts once per zone visit; leaving the zone (or a
+-- loading screen) starts a new visit. Several arrivals at once collapse into
+-- one summary banner.
+local alerted = {} -- list key -> true once alerted this visit
+local visitZone
+
+local function newVisit()
+    local zone = GetRealZoneText and GetRealZoneText() or ""
+    if zone ~= visitZone then wipe(alerted); visitZone = zone end
+end
+KOS:On("ZONE_CHANGED_NEW_AREA", newVisit)
+KOS:On("PLAYER_ENTERING_WORLD", function() wipe(alerted); visitZone = GetRealZoneText and GetRealZoneText() or "" end)
+
+-- Marking the player you're targeting counts as their alert for this visit:
+-- you already know they're there.
+function KOS:MarkedInView(key)
+    local info = self:UnitInfo("target")
+    if info and info.full and self:Canonical(info.full) == key then alerted[key] = true end
+end
 local recentAlerts = {}
 local burst
 
@@ -79,14 +94,13 @@ function KOS:Alert(key, T, how, isTest, seenAs)
     local mine = not T.virtual and self:MyVote(T) ~= nil
     if not isTest then
         if self:OnlyMutedMarks(T) then return end -- listed only by guildies you muted
-        local now = GetTime()
-        local arrived = not lastSeen[key] or now - lastSeen[key] > (S.cooldown or 180)
-        lastSeen[key] = now
-        if not arrived then return end
+        if alerted[key] then return end
         -- cold bounties go quiet, except players you marked yourself (if set)
         if not T.virtual and lvl < (S.minLevel or 1) and not (mine and S.alwaysMine) then return end
         -- KoS-guild members only get a skull unless you asked for banners
         if T.virtual and not S.guildBanners then return end
+        alerted[key] = true
+        local now = GetTime()
         local quietNow = (S.quietResting and IsResting and IsResting()) or (not S.alertsInPvP and self:InPvPInstance())
         for i = #recentAlerts, 1, -1 do
             if now - recentAlerts[i] > 15 then table.remove(recentAlerts, i) end

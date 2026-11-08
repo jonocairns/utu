@@ -378,7 +378,7 @@ function H.logout(c) c.online = false end
 -- A client logs back in: fresh Lua state, same SavedVariables.
 function H.relogin(c)
     for i, x in ipairs(H.clients) do if x == c then table.remove(H.clients, i) break end end
-    return H.newClient(c.name, { rank = c.rank, db = c.env.UtuDB })
+    return H.newClient(c.name, { rank = c.rank, db = c.env.UtuDB, version = c.version })
 end
 
 function H.chatContains(c, needle)

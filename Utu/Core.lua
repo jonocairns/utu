@@ -17,7 +17,7 @@ KOS.LOGO = "Interface\\AddOns\\Utu\\Media\\logo" -- the addon itself (pūkana fa
 KOS.DEFAULTS = {
     -- alerts on my screen
     banner = true, sound = "raid", chat = true, flash = false,
-    escalate = true, loudLevel = 20, minLevel = 3, cooldown = 180, quietResting = false,
+    escalate = true, loudLevel = 20, minLevel = 3, quietResting = false,
     alwaysMine = true,       -- players I marked always alert, however cold their bounty
     callForHelp = true,      -- tell guildies when a KoS player attacks me
     -- detect using
@@ -1378,6 +1378,7 @@ function KOS:Mark(name, note, guid, class)
     else
         self:Print("Marked", "|cffff6060" .. self:Display(full) .. "|r", "-", self:BountyTag(T))
     end
+    if self.MarkedInView then self:MarkedInView(key) end
     self:Changed()
 end
 
