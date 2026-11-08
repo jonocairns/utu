@@ -324,7 +324,7 @@ end
 local deathPrompt
 local function buildDeathPrompt()
     deathPrompt = makeToast("KillOnSightDeath", -220)
-    deathPrompt:SetSize(460, 64)
+    deathPrompt:SetSize(500, 64)
     deathPrompt:EnableMouse(true)
     deathPrompt.icon:SetVertexColor(1, 0.3, 0.2)
     deathPrompt.text:ClearAllPoints()
@@ -333,8 +333,8 @@ local function buildDeathPrompt()
     deathPrompt.buttons = {}
     for i = 1, 3 do
         local b = CreateFrame("Button", nil, deathPrompt, "UIPanelButtonTemplate")
-        b:SetSize(120, 22)
-        b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 124, 8)
+        b:SetSize(116, 22)
+        b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 120, 8) -- third ends at 388; "None" starts at 422
         b:SetScript("OnClick", function(self)
             KOS:ConfirmKiller(self.cand, deathPrompt.at, deathPrompt.zone)
             deathPrompt:Hide()

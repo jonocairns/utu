@@ -360,7 +360,7 @@ local function noteAttacker(u)
     if not key or key == KOS:MyKey() then return nil end
     remember(info)
     local a = attackers[key] or {}
-    a.full, a.guid, a.level, a.class, a.at = info.full, info.guid, info.level, info.class, GetTime()
+    a.full, a.guid, a.level, a.class, a.hostile, a.at = info.full, info.guid, info.level, info.class, info.hostile, GetTime()
     attackers[key] = a
     return key, a
 end
@@ -380,10 +380,15 @@ local function scanAttackers()
     end
     if KOS.caps.combatLog or not KOS.S.callForHelp or not ns.Sync then return end
     if GetTime() - lastDamaged > 2 then return end
+    -- fighting a mob of my own: the damage is probably from it, not them
+    local try = KOS.Try
+    if try(UnitExists, "target") and not try(UnitIsPlayer, "target") and try(UnitCanAttack, "player", "target") then return end
     local myLevel = UnitLevel("player")
     for _, a in pairs(found) do
-        local bully = a.level and myLevel and a.level - myLevel >= KOS.DEFEND_LEVELS
-        if bully or claimTarget(a.full, a.guid) then ns.Sync:CallForHelp(a.full) end
+        if a.hostile then -- known to be the other faction
+            local bully = a.level and myLevel and a.level - myLevel >= KOS.DEFEND_LEVELS
+            if bully or claimTarget(a.full, a.guid) then ns.Sync:CallForHelp(a.full, "t") end
+        end
     end
 end
 KOS.ScanAttackers = scanAttackers -- for tests
@@ -412,23 +417,28 @@ local function stopScanning()
     if scanTicker then scanTicker:Cancel(); scanTicker = nil end
 end
 
--- The death recap, if the client has one, may name the killing blow. Only
--- trusted if the newest event is from another player, and only once.
+-- The death recap, if the client has one, may name the killing blow
+-- (entry 1, as in Blizzard's recap window). Only offered if it's from
+-- another player and wasn't already there before this death.
 local lastRecapSig
-local function recapKiller()
+local function readRecap()
     if not KOS.caps.deathRecap then return nil end
     local ok, events = pcall(C_DeathRecap.GetRecapEvents)
-    if not ok or type(events) ~= "table" then return nil end
-    local newest, newestT = nil, nil
-    for _, e in ipairs(events) do
-        local ts = type(e) == "table" and KOS.Safe(e.timestamp)
-        if type(ts) == "number" and (not newestT or ts >= newestT) then newest, newestT = e, ts end
-    end
-    if not newest then return nil end
-    local sig = tostring(newestT) .. "/" .. #events
-    if sig == lastRecapSig then return nil end -- the previous death's recap
+    if not ok or KOS.IsSecret(events) or type(events) ~= "table" then return nil end
+    local first = events[1]
+    if type(first) ~= "table" then return nil end
+    local ts = KOS.Safe(first.timestamp)
+    return first, tostring(type(ts) == "number" and ts or "?") .. "/" .. #events
+end
+local function primeRecap() -- whatever recap exists at login belongs to an earlier death
+    local _, sig = readRecap()
     lastRecapSig = sig
-    local guid, name = KOS.Safe(newest.sourceGUID), KOS.Safe(newest.sourceName)
+end
+local function recapKiller()
+    local first, sig = readRecap()
+    if not first or sig == lastRecapSig then return nil end
+    lastRecapSig = sig
+    local guid, name = KOS.Safe(first.sourceGUID), KOS.Safe(first.sourceName)
     if type(guid) ~= "string" or type(name) ~= "string" or not guid:find("^Player%-") then return nil end
     if guid == KOS.Safe(UnitGUID("player")) then return nil end
     return name, guid
@@ -440,8 +450,7 @@ end
 
 -- I died. Offer the players who were on me (and the death recap's killer)
 -- so I can confirm who it was; that records the gank and marks them.
-local function onPlayerDeadNoLog()
-    local at, zone = GetServerTime(), zoneString()
+local function offerKillers(at, zone, recent)
     local cands, seen = {}, {}
     local function add(full, guid, level, class, why)
         local key = KOS:Canonical(full)
@@ -452,11 +461,18 @@ local function onPlayerDeadNoLog()
     end
     local rName, rGUID = recapKiller()
     if rName then add(rName, rGUID, nil, nil, "death recap") end
-    for _, a in ipairs(KOS:RecentAttackers(10)) do add(a.full, a.guid, a.level, a.class) end
-    wipe(attackers)
+    for _, a in ipairs(recent) do add(a.full, a.guid, a.level, a.class) end
     if #cands == 0 or not KOS:InWorld() or KOS:ListKey() == nil then return end
     while #cands > 3 do table.remove(cands) end
     if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone) end
+end
+
+-- the recap may fill in a moment after the death event
+local function onPlayerDeadNoLog()
+    local at, zone = GetServerTime(), zoneString()
+    local recent = KOS:RecentAttackers(10)
+    wipe(attackers)
+    C_Timer.After(1, function() offerKillers(at, zone, recent) end)
 end
 
 -- I confirmed who killed me (from the death prompt).
@@ -473,33 +489,60 @@ end
 
 -- Honour gains name the victim: "Gankdude dies, honorable kill Rank: ..."
 -- Every guildie credited with the kill can claim it; the bounty drains once.
+-- Turn a format string ("%s dies, honorable kill Rank: %s ...", or a
+-- localised "%2$s ... %1$s") into a pattern; returns it and which capture
+-- holds argument 1 (the victim).
+local function escape(s) return (s:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%0")) end
+local function patternFrom(fmt)
+    local parts, caps, argi, victimCap, i = {}, 0, 0, nil, 1
+    while true do
+        local s, e, num, conv = fmt:find("%%(%d?)%$?([sd])", i)
+        if not s then parts[#parts + 1] = escape(fmt:sub(i)); break end
+        parts[#parts + 1] = escape(fmt:sub(i, s - 1))
+        argi = argi + 1
+        local arg = tonumber(num) or argi
+        if conv == "s" then
+            caps = caps + 1
+            parts[#parts + 1] = "(.-)"
+            if arg == 1 then victimCap = caps end
+        else
+            parts[#parts + 1] = "%d+"
+        end
+        i = e + 1
+    end
+    if not victimCap then return nil end
+    return "^" .. table.concat(parts) .. "$", victimCap
+end
+
+local HONOR_STRINGS = { "COMBATLOG_HONORGAIN", "COMBATLOG_HONORGAIN_NO_RANK", "COMBATLOG_HONORGAIN_EXHAUSTION1",
+    "COMBATLOG_HONORGAIN_NO_RANK_EXHAUSTION1" }
 local honorPatterns
 local function buildHonorPatterns()
     honorPatterns = {}
-    for _, gs in ipairs({ "COMBATLOG_HONORGAIN", "COMBATLOG_HONORGAIN_NO_RANK", "COMBATLOG_HONORGAIN_EXHAUSTION1" }) do
+    for _, gs in ipairs(HONOR_STRINGS) do
         local fmt = _G[gs]
-        if type(fmt) == "string" and fmt:find("%%s") then
-            local pat = fmt:gsub("%%%d?%$?s", "\001"):gsub("%%%d?%$?d", "\002")
-            pat = pat:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%0")
-            pat = pat:gsub("\001", "(.-)"):gsub("\002", "%%d+")
-            honorPatterns[#honorPatterns + 1] = "^" .. pat .. "$"
+        if type(fmt) == "string" then
+            local pat, cap = patternFrom(fmt)
+            if pat then honorPatterns[#honorPatterns + 1] = { pat, cap } end
         end
     end
-    honorPatterns[#honorPatterns + 1] = "^(.-) dies, honorable kill"
+    honorPatterns[#honorPatterns + 1] = { "^(.-) dies, honorable kill", 1 }
 end
 
 local function honorVictim(msg)
     if not honorPatterns then buildHonorPatterns() end
     msg = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h%[?(.-)%]?|h", "%1")
-    for _, pat in ipairs(honorPatterns) do
-        local name = msg:match(pat)
+    for _, p in ipairs(honorPatterns) do
+        local caps = { msg:match(p[1]) }
+        local name = caps[p[2]]
         if name and name ~= "" then return name end
     end
 end
+KOS.HonorPatternFrom = patternFrom -- for tests
 KOS.HonorVictim = honorVictim -- for tests
 
 local function onHonorGain(msg)
-    if type(msg) ~= "string" or KOS.IsSecret(msg) then return end
+    if KOS.IsSecret(msg) or type(msg) ~= "string" then return end
     KOS:Sample("honor", msg)
     if KOS.caps.combatLog then return end -- the combat log already gives us killing blows
     local name = honorVictim(msg)
@@ -526,7 +569,7 @@ function KOS:ManualHelp()
         full = recent and recent.full
     end
     if not full then self:Print("Target the player attacking you, then call for help."); return end
-    if ns.Sync:CallForHelp(full) then
+    if ns.Sync:CallForHelp(full, "m") then
         self:Notify("me", "Called nearby guildies for help against " .. self:Display(full) .. ".")
     else
         self:Print("Can't call for help against " .. self:Display(full) .. " right now (one call a minute, not in raids).")
@@ -592,7 +635,7 @@ end
 local function onTooltipUnit(tt)
     if not KOS.S or not KOS.S.tooltip then return end
     local _, unit = tt:GetUnit()
-    if not unit or KOS.IsSecret(unit) then return end
+    if KOS.IsSecret(unit) or not unit then return end
     local info = KOS:UnitInfo(unit)
     if not info then return end
 
@@ -682,10 +725,11 @@ KOS:On("CHAT_MSG_COMBAT_HONOR_GAIN", onHonorGain)
 
 -- taking damage: UNIT_COMBAT where available, else watch my health drop
 KOS:On("UNIT_COMBAT", function(unit, action)
-    if unit == "player" and action ~= "HEAL" and not KOS.IsSecret(action) then onDamaged() end
+    if KOS.IsSecret(unit) or KOS.IsSecret(action) then return end
+    if unit == "player" and action == "WOUND" then onDamaged() end
 end)
 KOS:On("UNIT_HEALTH", function(unit)
-    if unit ~= "player" then return end
+    if KOS.IsSecret(unit) or unit ~= "player" then return end
     local h = KOS.Try(UnitHealth, "player")
     if type(h) ~= "number" then return end
     if lastHealth and h < lastHealth then onDamaged() end
@@ -694,3 +738,4 @@ end)
 KOS:On("PLAYER_REGEN_DISABLED", startScanning)
 KOS:On("PLAYER_REGEN_ENABLED", stopScanning)
 KOS:On("PLAYER_ALIVE", function() lastHealth = nil end)
+KOS:On("PLAYER_LOGIN", primeRecap)

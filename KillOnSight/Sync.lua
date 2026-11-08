@@ -179,6 +179,9 @@ end
 
 local function pump()
     if not IsInGuild() then wipe(hi); wipe(lo) end
+    -- addons may not message other players from inside instances (Midnight
+    -- engine): hold everything until we're back in the world
+    if not KOS:InWorld() then return end
     -- bulk sync waits until you're out of combat; live messages still go
     local q = (#hi > 0) and hi or ((InCombatLockdown and InCombatLockdown()) and {} or lo)
     if #q == 0 then
@@ -226,14 +229,16 @@ local function coords()
 end
 
 -- Returns true if the call went out.
-function Sync:CallForHelp(attackerFull)
+-- how: nil = they hit me (combat log), "t" = they're targeting me while I
+-- take damage (no combat log: probably them), "m" = I called by hand.
+function Sync:CallForHelp(attackerFull, how)
     if not KOS:IsGuildList() or not KOS:InWorld() or IsInRaid() then return false end
     local key = KOS:Canonical(attackerFull)
     if not key or (lastHelp[key] and GetTime() - lastHelp[key] < 60) then return false end
     lastHelp[key] = GetTime()
     local map, x, y = KOS:MyPosition()
     enqueue(hi, join("A", attackerFull, (KOS.ZoneString and KOS.ZoneString() or (GetRealZoneText() or "")) .. coords(),
-        tostring(map or ""), x and string.format("%.4f", x) or "", y and string.format("%.4f", y) or ""))
+        tostring(map or ""), x and string.format("%.4f", x) or "", y and string.format("%.4f", y) or "", how or ""))
     return true
 end
 
@@ -522,7 +527,7 @@ function Sync:OnMessage(text, sender, isRetry)
         elseif self:ShouldAnswer(digest) then self.pendingAsk = true; self:ScheduleDump() end
 
     elseif tag == "A" then
-        local attacker, zone, map, x, y = strsplit(SEP, payload)
+        local attacker, zone, map, x, y, how = strsplit(SEP, payload)
         local key, full = KOS:Canonical(attacker)
         if not key then return end
         zone = KOS.CleanText(zone, 70)
@@ -538,7 +543,9 @@ function Sync:OnMessage(text, sender, isRetry)
         if dist then near = dist <= (KOS.S.helpRange or 400) else near = sameZone end
         local grouped = (UnitInParty and UnitInParty(KOS:Display(senderFull))) or (UnitInRaid and UnitInRaid(KOS:Display(senderFull)))
         local where = dist and string.format("%d yd %s", dist, dir) or zone
-        local text = "HELP! " .. KOS:Display(senderFull) .. " is being ganked by " .. KOS:Display(full) .. " - " .. where
+        local verb = (how == "t" and " is under attack, likely by ") or (how == "m" and " needs help against ")
+            or " is being ganked by "
+        local text = "HELP! " .. KOS:Display(senderFull) .. verb .. KOS:Display(full) .. " - " .. where
         local mode = KOS.S.helpBanner
         local show = (mode == "any") or (mode == "zone" and sameZone) or (mode == "near" and near)
         local now = GetTime()

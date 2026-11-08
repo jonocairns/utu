@@ -63,6 +63,7 @@ KOS.GREY_FULL = 4                 -- full points up to this many levels below yo
 KOS.GREY_ZERO = 10                -- ...sliding to nothing at this many
 KOS.FARM_FLAG = 5                 -- audit: > this many kills of one target by one hunter per hour
 KOS.THREAT_WINDOW = 1800          -- zone threat looks at the last 30 minutes
+KOS.ASSIST_DELAY = 5               -- seconds a responder assist waits for a possible honour kill
 KOS.RESPOND_RANGE = 150           -- "On my way" responders this close to the call when the attacker dies get an assist
 
 KOS.SOUNDS = {
@@ -938,7 +939,11 @@ end
 -- excludeKey: leave out this guildie's mark and the ganks of them (so you
 --   can't raise a bounty by dying to a friend and then collect it).
 -- at: score as of this time (only counts what existed then).
-function KOS:Score(T, excludeKey, at, upperBound)
+-- forClaim: pricing a claim by excludeKey. Ignores other hunters' drains
+--   from the last KILL_CLUSTER seconds, so everyone credited with one shared
+--   kill is priced against the bounty as it was before that kill, whichever
+--   claim arrived first.
+function KOS:Score(T, excludeKey, at, upperBound, forClaim)
     local now = at or GetServerTime()
     local key = self:Canonical(T.n)
     local pardon = T.cleared and T.cleared.t or -1
@@ -959,7 +964,9 @@ function KOS:Score(T, excludeKey, at, upperBound)
     end
     -- bounties get paid down by kills; they refill only if the target keeps ganking
     for _, k in ipairs(drainsOn(key)) do
-        if k.t > pardon and k.t < now then
+        -- (a kill by the same hunter moments ago is a separate kill and does count)
+        local sameKill = forClaim and now - k.t <= self.KILL_CLUSTER and self:Canonical(k.by) ~= excludeKey
+        if k.t > pardon and k.t < now and not sameKill then
             s = s - self.KILL_DRAIN * self:Decay(now - k.t)
         end
     end
@@ -1261,7 +1268,7 @@ function KOS:BountyValue(T, hunterKey, targetLevel, at, noGrey, upperBound)
         if diff > self.GREY_FULL then grey = (self.GREY_ZERO - diff) / (self.GREY_ZERO - self.GREY_FULL) end
     end
     if T.virtual then return math.max(1, math.floor(self.GUILD_MEMBER_POINTS * grey + 0.5)) end
-    local lvl = self.BountyLevel(self:Score(T, hunterKey, at, upperBound))
+    local lvl = self.BountyLevel(self:Score(T, hunterKey, at, upperBound, true))
     if lvl == 0 then
         local others = 0
         for rk, x in pairs(T.votes) do if rk ~= hunterKey and self:MarkActive(x) then others = others + 1 end end
@@ -1357,11 +1364,16 @@ function KOS:CheckResponder(targetFull, killerFull)
     if not r then return end
     responding[key] = nil
     if GetTime() - r.at > self.RESCUE_WINDOW + 60 or self:Canonical(killerFull) == self:MyKey() then return end
-    if self:ClaimedRecently(key) then return end -- honour already credited me with the kill
     local dist = self:DistanceTo(r.map, r.x, r.y)
     if not dist or dist > self.RESPOND_RANGE then return end
-    local T = self:Lookup(key)
-    if T then self:ClaimAssist(T, killerFull, self.ZoneString and self.ZoneString() or "", nil, "answered the call") end
+    local zone = self.ZoneString and self.ZoneString() or ""
+    -- wait a moment: if the game credits me with the kill (honour), that
+    -- full claim replaces the assist
+    C_Timer.After(self.ASSIST_DELAY, function()
+        if self:ClaimedRecently(key) then return end
+        local T = self:Lookup(key)
+        if T then self:ClaimAssist(T, killerFull, zone, nil, "answered the call") end
+    end)
 end
 function KOS:RescueFor(key)
     local d = distress[key]
@@ -1915,7 +1927,8 @@ local function setupMenus()
     }
     for _, tag in ipairs(tags) do
         pcall(Menu.ModifyMenu, tag, function(owner, root, ctx)
-            if not ctx or not ctx.name or KOS.IsSecret(ctx.name) or KOS.IsSecret(ctx.server) then return end
+            if not ctx or KOS.IsSecret(ctx.name) or KOS.IsSecret(ctx.server) or KOS.IsSecret(ctx.unit) then return end
+            if not ctx.name then return end
             local name = ctx.name
             if ctx.server and ctx.server ~= "" and not name:find("-", 1, true) then name = name .. "-" .. ctx.server end
             local key = KOS:Canonical(name)
@@ -2108,27 +2121,39 @@ end
 
 -- Each handler runs protected: an error is saved to KillOnSightDB.diag and
 -- passed on to the normal error handler, and the other handlers still run.
-local current, args, nargs = nil, {}, 0
+local current, currentEvent, args, nargs = nil, nil, {}, 0
 local function runCurrent() return current(unpack(args, 1, nargs)) end
 local function onError(err)
-    if KOS.RecordError then KOS:RecordError(current and "event" or "?", err) end
+    if KOS.RecordError then KOS:RecordError(currentEvent or "?", err) end
     return err
 end
+local depth = 0
 local function dispatch(event, ...)
     local list = handlers[event]
     if not list or (not KOS.db and event ~= "ADDON_LOADED") then return end
     if KOS.CountEvent then KOS:CountEvent(event) end
+    -- a handler can trigger another event synchronously: keep the outer one's state
+    local saved, savedN, savedCurrent, savedEvent
+    if depth > 0 then saved, savedN, savedCurrent, savedEvent = args, nargs, current, currentEvent; args = {} end
+    depth = depth + 1
+    currentEvent = event
     nargs = select("#", ...)
     for i = 1, nargs do args[i] = select(i, ...) end
+    local failed
     for i = 1, #list do
         current = list[i]
         local ok, err = xpcall(runCurrent, onError)
-        if not ok then
-            local handler = geterrorhandler and geterrorhandler()
+        if not ok then failed = failed or {}; failed[#failed + 1] = err end
+    end
+    depth = depth - 1
+    if saved then args, nargs, current, currentEvent = saved, savedN, savedCurrent, savedEvent
+    else current, currentEvent = nil, nil end
+    if failed then
+        local handler = geterrorhandler and geterrorhandler()
+        for _, err in ipairs(failed) do
             if handler then handler(err) else error(err, 0) end
         end
     end
-    current = nil
 end
 frame:SetScript("OnEvent", function(_, event, ...) dispatch(event, ...) end)
 

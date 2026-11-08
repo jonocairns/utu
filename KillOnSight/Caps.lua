@@ -13,8 +13,11 @@ local KOS = ns.KOS
 -- Secret values
 ------------------------------------------------------------------------
 
+-- Never compare, index or print a value before this says it isn't secret:
+-- on the Midnight engine even `v ~= nil` throws for a secret.
 local function isSecret(v)
-    return issecretvalue ~= nil and v ~= nil and issecretvalue(v) == true
+    if not issecretvalue then return false end
+    return issecretvalue(v) == true
 end
 KOS.IsSecret = isSecret
 
@@ -66,7 +69,7 @@ function KOS:CapsSummary()
         row(c.combatLog, "Kill credit and gank detection from the combat log",
             "No combat log on this client: kills come from honour gains, and you confirm who killed you"),
         row(c.position, "Help-call distances", "No map position: help calls use the whole zone"),
-        row(c.deathRecap, "Death recap may name your killer", "No death recap"),
+        row(c.deathRecap, "Death recap available (may name your killer)", "No death recap"),
     }
 end
 
@@ -181,7 +184,7 @@ end
 
 local function probeUnit(unit)
     local exists = probeCall(UnitExists, unit)
-    if exists ~= "true" then return { exists = exists } end
+    if exists == "false" or exists == "nil" then return { exists = exists } end
     return {
         exists = exists,
         name = probeCall(UnitName, unit),
@@ -221,9 +224,15 @@ local APIS = {
 
 local PROBE_EVENTS = { "COMBAT_LOG_EVENT_UNFILTERED", "UNIT_COMBAT", "CHAT_MSG_COMBAT_HONOR_GAIN" }
 
+local function step(p, name, fn)
+    local ok, err = pcall(fn)
+    if not ok then p.failed = p.failed or {}; p.failed[name] = tostring(err):sub(1, 160) end
+end
+
 function KOS:Probe()
     local db = self.db
     local p = { t = GetServerTime() }
+    db.probe = p -- saved as we go, so a failing step doesn't lose the rest
     local version, build, date, toc = GetBuildInfo()
     p.client = { version = version, build = build, date = date, toc = toc }
     p.project = { id = WOW_PROJECT_ID, camelot = WOW_PROJECT_CAMELOT, classic = WOW_PROJECT_CLASSIC,
@@ -233,78 +242,99 @@ function KOS:Probe()
     p.apis = {}
     for _, name in ipairs(APIS) do p.apis[name] = has(name) end
 
-    -- Can we register the events we care about? Uses a throwaway frame.
-    -- (May show a "blocked" message once on clients that forbid the combat log.)
+    -- Which events will the client let us register? Skips the combat log on
+    -- clients with secret values: registering it there may be forbidden.
     p.register = {}
-    local f = CreateFrame("Frame")
-    for _, e in ipairs(PROBE_EVENTS) do
-        local ok, err = pcall(f.RegisterEvent, f, e)
-        local reg = ok and f.IsEventRegistered and f:IsEventRegistered(e)
-        p.register[e] = ok and (reg and "ok" or "not registered") or ("error: " .. tostring(err):sub(1, 120))
-    end
-    pcall(f.UnregisterAllEvents, f)
-
-    p.player = probeUnit("player")
-    p.target = probeUnit("target")
-    p.mouseover = probeUnit("mouseover")
-    p.nameplates = {}
-    local n = 0
-    for i = 1, 40 do
-        local u = "nameplate" .. i
-        if try(UnitExists, u) then
-            n = n + 1
-            if n <= 3 then p.nameplates[#p.nameplates + 1] = probeUnit(u) end
+    step(p, "register", function()
+        local f = CreateFrame("Frame")
+        for _, e in ipairs(PROBE_EVENTS) do
+            if e == "COMBAT_LOG_EVENT_UNFILTERED" and self.caps.secrets then
+                p.register[e] = "skipped (client has secret values)"
+            else
+                local ok, err = pcall(f.RegisterEvent, f, e)
+                local reg = ok and f.IsEventRegistered and select(2, pcall(f.IsEventRegistered, f, e))
+                p.register[e] = ok and (reg == true and "ok" or "not registered") or ("error: " .. tostring(err):sub(1, 120))
+            end
         end
-    end
-    p.nameplateCount = n
+        pcall(f.UnregisterAllEvents, f)
+    end)
+    for k, v in pairs(self.blockedEvents or {}) do p.register[k] = "refused at load" end
 
-    local map = try(C_Map and C_Map.GetBestMapForUnit, "player")
-    p.position = { map = describe(map) }
-    if map and C_Map.GetPlayerMapPosition then
-        local ok, pos = pcall(C_Map.GetPlayerMapPosition, map, "player")
-        if ok and pos and pos.GetXY then
-            local x, y = pos:GetXY()
-            p.position.x, p.position.y = describe(x), describe(y)
-        else
-            p.position.err = ok and "no position" or tostring(pos)
+    step(p, "player", function()
+        p.player = probeUnit("player")
+        p.playerGuild = probeCall(GetGuildInfo, "player")
+        p.playerLevel = probeCall(UnitLevel, "player")
+    end)
+    step(p, "target", function() p.target = probeUnit("target") end)
+    step(p, "mouseover", function() p.mouseover = probeUnit("mouseover") end)
+    p.nameplateCount = 0
+    step(p, "nameplates", function()
+        p.nameplates = {}
+        for i = 1, 40 do
+            local u = "nameplate" .. i
+            if try(UnitExists, u) then
+                p.nameplateCount = p.nameplateCount + 1
+                if #p.nameplates < 3 then p.nameplates[#p.nameplates + 1] = probeUnit(u) end
+            end
         end
-    end
-    p.unitPosition = probeCall(UnitPosition, "player")
+    end)
 
-    -- death recap: what does the most recent one look like?
-    if C_DeathRecap and C_DeathRecap.GetRecapEvents then
+    step(p, "position", function()
+        local map = try(C_Map and C_Map.GetBestMapForUnit, "player")
+        p.position = { map = describe(map) }
+        if map and C_Map.GetPlayerMapPosition then
+            local ok, pos = pcall(C_Map.GetPlayerMapPosition, map, "player")
+            if ok and pos and not isSecret(pos) and pos.GetXY then
+                local ok2, x, y = pcall(pos.GetXY, pos)
+                if ok2 then p.position.x, p.position.y = describe(x), describe(y) end
+            else
+                p.position.err = ok and "no position" or tostring(pos)
+            end
+        end
+        p.unitPosition = probeCall(UnitPosition, "player")
+    end)
+
+    -- death recap: what does the most recent one look like? (entry 1 is the killing blow)
+    step(p, "recap", function()
+        if not (C_DeathRecap and C_DeathRecap.GetRecapEvents) then return end
         local ok, events = pcall(C_DeathRecap.GetRecapEvents)
         if not ok then
             p.recap = "error: " .. tostring(events):sub(1, 120)
-        elseif type(events) ~= "table" then
+        elseif isSecret(events) or type(events) ~= "table" then
             p.recap = describe(events)
         else
             p.recap = { count = #events }
-            local e = events[#events] or events[1]
-            if type(e) == "table" then
-                for k, v in pairs(e) do p.recap[tostring(k)] = describe(v) end
+            for i = 1, math.min(2, #events) do
+                local e = events[i]
+                if type(e) == "table" then
+                    local row = {}
+                    for k, v in pairs(e) do row[tostring(k)] = describe(v) end
+                    p.recap[i] = row
+                end
             end
         end
-    end
+    end)
 
     p.events = {}
     for k, v in pairs(self.eventCounts) do p.events[k] = v end
-    p.addonVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
-        or (GetAddOnMetadata and GetAddOnMetadata(ADDON, "Version"))
-    db.probe = p
+    step(p, "version", function()
+        p.addonVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
+            or (GetAddOnMetadata and GetAddOnMetadata(ADDON, "Version"))
+    end)
 
     -- short summary in chat
     local t = p.target
     self:Print("Probe saved. Client " .. tostring(version) .. " (" .. tostring(toc) .. ").")
+    if p.failed then self:Print("Some probe steps failed; that's useful too.") end
     self:Print("Combat log: " .. tostring(p.register.COMBAT_LOG_EVENT_UNFILTERED)
         .. ". Honour messages seen: " .. (self.eventCounts.CHAT_MSG_COMBAT_HONOR_GAIN or 0)
         .. ". Death recap: " .. (p.recap and (type(p.recap) == "table" and "yes" or p.recap) or "missing") .. ".")
-    if t.exists == "true" then
+    if t and t.name then
         self:Print("Target name: " .. t.name .. "; guild: " .. t.guild .. "; level: " .. t.level
             .. "; targeting you: " .. t.targetingMe .. ".")
     else
         self:Print("Tip: target an enemy player and run /kos probe again to test name reading.")
     end
-    self:Print(n .. " nameplates visible. Log out or /reload to write the results to disk.")
+    self:Print(p.nameplateCount .. " nameplates visible. Log out or /reload to write the results to disk.")
     return p
 end

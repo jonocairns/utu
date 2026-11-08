@@ -443,7 +443,7 @@ test("help calls are distance-gated within the zone; On my way + responder assis
     H.advance(2)
     assert(H.chatContains(c, "Alice is on the way"), "Carol knows help is coming")
     killEvent(b, "Gankdude")
-    H.advance(2)
+    H.advance(7) -- the assist waits a moment in case the game credits a full kill
     local _, row = c.KOS:PointsOf("Alice-Forever")
     assert(row and row.assists == 1 and row.points > 0, "Alice made it (120 yd): assist")
     eq(points(c, "Eve"), 0, "Eve was still 1700 yd away: no assist")
@@ -978,6 +978,9 @@ test("forever: honour kills pay every credited guildie; the bounty drains once",
     H.advance(2)
     local before = c.KOS:Score(T_(c, "Gankdude"))
     eq(a.KOS.HonorVictim("Gankdude dies, honorable kill Rank: Scout (Estimated Honor Points: 12)"), "Gankdude")
+    eq(a.KOS.HonorVictim("Mietta Grace dies, honorable kill (Estimated Honor Points: 9)"), "Mietta Grace")
+    local pat, cap = a.KOS.HonorPatternFrom("Rang %2$s: %1$s stirbt (%3$d)")
+    eq(select(cap, ("Rang Späher: Gankdude stirbt (12)"):match(pat)), "Gankdude", "positional formats pick argument 1")
     honor(a, "Gankdude")
     honor(b, "Gankdude")
     H.advance(2)
@@ -1006,10 +1009,10 @@ test("forever: who killed me comes from a prompt; confirming records the gank an
     a.health = 50; H.fire(a, "UNIT_HEALTH", "player")
     H.advance(1)
     H.fire(a, "PLAYER_DEAD")
+    H.advance(1.5)
     assert(shown, "prompt shown")
     eq(#shown.cands, 1, "only the hostile player targeting me")
     eq(shown.cands[1].full, "Gankdude-Forever")
-    eq(#b.KOS:Deaths() == nil and 0 or 0, 0)
     a.KOS:ConfirmKiller(shown.cands[1], shown.at, shown.zone)
     H.advance(2)
     local T = b.KOS:Lookup("gankdude-forever")
@@ -1023,18 +1026,31 @@ test("forever: the death recap's killer is offered first", function()
     H.advance(20)
     local shown
     a.KOS.ShowDeathPrompt = function(_, cands) shown = cands end
+    -- entry 1 is the killing blow, as in Blizzard's recap window
     a.recap = {
-        { timestamp = 10, sourceName = "Earlier", sourceGUID = "Player-1-0020" },
         { timestamp = 12, sourceName = "Recapper", sourceGUID = "Player-1-0021" },
+        { timestamp = 10, sourceName = "Earlier", sourceGUID = "Player-1-0020" },
     }
     H.fire(a, "PLAYER_DEAD")
+    eq(shown, nil, "waits a moment for the recap")
+    H.advance(1.5)
     assert(shown and shown[1].full == "Recapper-Forever" and shown[1].why == "death recap", "recap killer first")
     shown = nil
-    H.fire(a, "PLAYER_DEAD")
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
     eq(shown, nil, "the same recap isn't reused for the next death")
     a.recap = { { timestamp = 20, sourceName = "Murloc", sourceGUID = "Creature-0-1" } }
-    H.fire(a, "PLAYER_DEAD")
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
     eq(shown, nil, "a mob finishing you off isn't offered")
+    -- a recap left over from before logging in isn't offered
+    local b = H.newClient("Bob")
+    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030" } }
+    b = H.relogin(b)
+    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030" } }
+    local bShown
+    b.KOS.ShowDeathPrompt = function(_, cands) bShown = cands end
+    H.fire(b, "PLAYER_LOGIN")
+    H.fire(b, "PLAYER_DEAD"); H.advance(1.5)
+    eq(bShown, nil, "stale recap ignored")
 end)
 
 test("forever: KoS player targeting me while I take damage calls for help; /kos sos too", function()
@@ -1051,6 +1067,24 @@ test("forever: KoS player targeting me while I take damage calls for help; /kos 
     H.advance(2)
     local function helped(cl) for _, w in ipairs(cl.raidWarnings) do if w:find("HELP!") then return true end end end
     assert(helped(b), "Bob got the help call")
+    local w
+    for _, x in ipairs(b.raidWarnings) do if x:find("HELP!") then w = x end end
+    assert(w:find("likely by Gankdude"), "worded as a likely attacker: " .. w)
+    -- fighting a mob of my own: no automatic call
+    local c = H.newClient("Carol")
+    H.advance(20)
+    c.KOS:Mark("Otherganker", "")
+    H.advance(2)
+    c.units.target = { name = "Murloc", npc = true }
+    c.env.UnitIsPlayer = function(u) return u == "player" or (c.units[u] ~= nil and not c.units[u].npc) end
+    c.env.UnitCanAttack = function(_, u) return c.units[u] ~= nil end
+    c.units.nameplate2 = { name = "Otherganker", guid = "Player-1-0077", level = 60, targeting = "player" }
+    H.fire(c, "NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.fire(c, "PLAYER_REGEN_DISABLED")
+    c.health = 80; H.fire(c, "UNIT_HEALTH", "player")
+    c.health = 60; H.fire(c, "UNIT_HEALTH", "player")
+    H.advance(2)
+    assert(not feedHas(b, "likely by Otherganker"), "no help call while Carol fights her own mob")
     -- manual call against an unmarked target
     a.units.target = { name = "Somebody", guid = "Player-1-0005", level = 30 }
     H.slash(a, "sos")
@@ -1122,6 +1156,66 @@ test("search filters the Wanted list and trims spaces", function()
     eq(search("OTHER"), "1 player", "case-insensitive names")
     eq(search("nobody"), "0 players")
     assert(w.list.empty:GetText():find("No one matches"), "says nothing matched rather than 'list empty'")
+end)
+
+
+test("forever: everyone on one shared kill is priced the same, whichever claim lands first", function()
+    H.forever = true
+    local a, b, c, d = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol"), H.newClient("Dave")
+    H.advance(20)
+    c.KOS:Mark("Gankdude", ""); d.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    honor(a, "Gankdude")
+    H.advance(3) -- Alice's claim (and its drain) reaches Bob first
+    honor(b, "Gankdude")
+    H.advance(2)
+    eq(points(c, "Bob"), points(c, "Alice"), "Bob isn't priced after Alice's drain")
+    for _, cl in ipairs(c.KOS:Claims()) do eq(#cl.flags, 0, "neither claim looks inflated") end
+end)
+
+test("forever: a responder credited by honour gets the kill, not an assist as well", function()
+    H.forever = true
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    c.x, c.y = 0.50, 0.50; a.x, a.y = 0.52, 0.50
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    c.KOS:ManualHelp() -- no target: nothing to call against
+    c.units.target = { name = "Gankdude", guid = "Player-1-0001", level = 60 }
+    c.KOS:ManualHelp()
+    H.advance(2)
+    a.KOS:Respond("Gankdude-Forever")
+    H.advance(1)
+    honor(b, "Gankdude") -- Bob's claim arrives at Alice first...
+    H.advance(1)
+    honor(a, "Gankdude") -- ...then the game credits Alice too
+    H.advance(7)
+    local _, row = c.KOS:PointsOf("Alice-Forever")
+    eq(row.assists, 0, "no extra assist")
+    eq(row.kills, 1)
+end)
+
+test("events fired from inside a handler don't scramble the outer handler's arguments", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    local got
+    a.KOS:On("KOS_OUTER", function() H.fire(a, "KOS_INNER", "inner") end)
+    a.KOS:On("KOS_OUTER", function(x) got = x end)
+    a.KOS:On("KOS_INNER", function() end)
+    H.fire(a, "KOS_OUTER", "outer")
+    eq(got, "outer")
+end)
+
+test("sync holds its messages inside instances and sends them back in the world", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    H.inInstance = true
+    a.KOS:Mark("Gankdude", "")
+    H.advance(5)
+    eq(b.KOS:Lookup("gankdude-forever"), nil, "nothing sent from the dungeon")
+    H.inInstance = false
+    H.advance(5)
+    assert(b.KOS:Lookup("gankdude-forever"), "sent once back outside")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
