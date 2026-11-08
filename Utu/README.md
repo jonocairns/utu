@@ -39,7 +39,7 @@ If something goes wrong, the addon saves its own errors (and `/kos probe` result
 
 ## Staying out of your way
 
-- **Mute a guildie.** If someone marks everyone, click **Mute...** under a player's marks (or `/utu mute Name`). Their marks stop alerting you, and their marks and sightings disappear from your Activity and chat. It's just for you: bounties, points and the leaderboard don't change, and their help calls and gank reports still show. Undo it with `/utu unmute Name` or in Settings.
+- **Mute a guildie.** If someone marks everyone, click **Mute...** under a player's marks (or `/utu mute Name`). Their marks stop alerting you, and their marks and sightings disappear from your Activity and chat. It's just for you: bounties, points and the leaderboard don't change, and their help calls and gank reports still show. You can also right-click a guildie's name and pick **Mute their marks**. To see who you've muted, unmute someone or mute by name, use the **Muted** button at the top of the Activity tab (or `/utu unmute Name`).
 - **Alerts on arrival only.** You're alerted when a marked player shows up, not every minute they stay. Several arrivals at once become one "6 KoS nearby" banner.
 - **Quiet thresholds.** Below bounty Lv 3 there's no alert, except for players *you* marked. Battlegrounds and arenas are quiet by default.
 - **Activity tab.** Every guild event goes there. Chat shows only what's about you, near you, or big news, at most 4 lines per 10 seconds. You can change this in Settings.

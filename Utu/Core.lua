@@ -2083,6 +2083,29 @@ StaticPopupDialogs["UTU_NOTE"] = {
     EditBoxOnEscapePressed = function(eb) eb:GetParent():Hide() end,
 }
 
+StaticPopupDialogs["UTU_MUTE"] = {
+    text = "Utu: mute which guildie's marks and sightings? (Just for you.)",
+    button1 = ACCEPT or "Accept",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    maxLetters = 60,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    OnShow = function(self) local eb = popupEditBox(self); eb:SetText(""); eb:SetFocus() end,
+    OnAccept = function(self)
+        local name = strtrim(popupEditBox(self):GetText())
+        if name ~= "" then KOS:SetMuted(name, true) end
+    end,
+    EditBoxOnEnterPressed = function(eb)
+        local name = strtrim(eb:GetText())
+        eb:GetParent():Hide()
+        if name ~= "" then KOS:SetMuted(name, true) end
+    end,
+    EditBoxOnEscapePressed = function(eb) eb:GetParent():Hide() end,
+}
+
 StaticPopupDialogs["UTU_ADDNAME"] = {
     text = "Utu: character name to mark",
     button1 = ACCEPT or "Accept",
@@ -2150,6 +2173,19 @@ local function setupMenus()
             if ctx.server and ctx.server ~= "" and not name:find("-", 1, true) then name = name .. "-" .. ctx.server end
             local key = KOS:Canonical(name)
             if not key or key == KOS:MyKey() then return end
+            -- guildies: mute or unmute their marks and sightings (just for you)
+            local guildie = KOS:RankOf(name) ~= nil or (ctx.unit and KOS.Try(UnitIsInMyGuild, ctx.unit))
+                or tag == "MENU_UNIT_GUILD" or tag == "MENU_UNIT_COMMUNITIES_GUILD_MEMBER"
+            if guildie and KOS:IsGuildList() then
+                root:CreateDivider()
+                root:CreateTitle("Utu")
+                if KOS:IsMuted(name) then
+                    root:CreateButton("Unmute their marks", function() KOS:SetMuted(name, false) end)
+                else
+                    root:CreateButton("Mute their marks", function() KOS:SetMuted(name, true) end)
+                end
+                return
+            end
             local info = ctx.unit and KOS:UnitInfo(ctx.unit)
             local guid, class = info and info.guid, info and info.class
             local T = KOS:GetTarget(key)

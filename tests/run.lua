@@ -1461,6 +1461,9 @@ test("muting a guildie hides their marks and sightings from you; bounties stay t
     assert(feedHas(a, "Bob marked"), "unmuting brings Bob's marks back")
     H.slash(a, "mute Alice")
     eq(a.KOS:IsMuted("Alice-Forever"), false)
+    -- the "Mute a guildie by name" box
+    a.env.StaticPopupDialogs.UTU_MUTE.OnAccept({ editBox = { GetText = function() return " bob " end } })
+    assert(a.KOS:IsMuted("Bob-Forever"), "muted from the name box")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

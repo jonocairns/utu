@@ -49,6 +49,7 @@ local function Edit(parent, w, placeholder)
     e:SetScript("OnEscapePressed", e.ClearFocus)
     return e
 end
+KOS.Edit = Edit -- the settings page uses it too
 
 local function Bar(parent, w, h)
     local b = CreateFrame("StatusBar", nil, parent)
@@ -654,9 +655,37 @@ local function buildActivity()
     local p = newPage("activity")
     activity.info = Text(p, "GameFontDisableSmall")
     activity.info:SetPoint("TOPLEFT", 20, -10)
-    activity.info:SetWidth(W - 40)
+    activity.info:SetWidth(W - 170)
     activity.info:SetWordWrap(false)
     activity.info:SetText("Everything your guild does. Chat only shows what your Guild activity setting allows.")
+    -- muted guildies: unmute, or mute someone by name
+    activity.muted = Button(p, "Muted", 120, function(b)
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then
+            local list = KOS:MutedList()
+            for i, full in ipairs(list) do list[i] = KOS:Display(full) end
+            KOS:Print((#list > 0 and ("Muted: " .. table.concat(list, ", ") .. ". ") or "")
+                .. "/utu mute Name and /utu unmute Name.")
+            return
+        end
+        MenuUtil.CreateContextMenu(b, function(_, root)
+            local list = KOS:MutedList()
+            root:CreateTitle(#list > 0 and "Muted guildies (untick to unmute)" or "Nobody muted")
+            for _, full in ipairs(list) do
+                root:CreateCheckbox(KOS:Display(full), function() return KOS:IsMuted(full) end,
+                    function() KOS:SetMuted(full, not KOS:IsMuted(full)) end)
+            end
+            root:CreateDivider()
+            root:CreateButton("Mute a guildie by name...", function() StaticPopup_Show("UTU_MUTE") end)
+            if #list > 1 then
+                root:CreateButton("Unmute everyone", function()
+                    wipe(KOS.S.muted)
+                    KOS:Print("Unmuted everyone.")
+                    KOS:RefreshUI()
+                end)
+            end
+        end)
+    end)
+    activity.muted:SetPoint("TOPRIGHT", -14, -4)
     activity.list = List(p, 10, -30, W - 20, H + TOP - 28 - 38, 22, function(r)
         r.dot = r:CreateTexture(nil, "ARTWORK")
         r.dot:SetSize(4, 14)
@@ -678,6 +707,8 @@ local function buildActivity()
 end
 
 local function refreshActivity()
+    local n = #KOS:MutedList()
+    activity.muted:SetText(n > 0 and ("Muted (" .. n .. ")") or "Muted guildies")
     activity.list:Update(KOS:Activity())
 end
 
