@@ -411,6 +411,8 @@ end
 
 function KOS:UnitFull(unit)
     local n, r = UnitName(unit)
+    -- Forever (Midnight engine) can hide names as "secret" values; comparing one throws.
+    if issecretvalue and (issecretvalue(n) or issecretvalue(r)) then return nil end
     if not n or n == "" or n == UNKNOWNOBJECT then return nil end
     if r and r ~= "" then n = n .. "-" .. r end
     return n
