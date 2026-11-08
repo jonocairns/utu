@@ -12,7 +12,7 @@ Open it with `/kos` or the minimap button. Everything, settings included, is in 
 
 Copy `KillOnSight` into `World of Warcraft/<client>/Interface/AddOns/`.
 
-If the addon list shows it as *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `KillOnSight.toc`.
+If the addon list shows it as *Incompatible* or *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `KillOnSight.toc`. (Forever 1.60.1 is `16001`.)
 
 **Turn on enemy nameplates (V).** They're the main long-range detection.
 
