@@ -406,13 +406,10 @@ local function createMinimapButton()
     if mmButton or not Minimap then return end
     mmButton = CreateFrame("Button", "UtuMinimapButton", Minimap)
     mmButton:SetSize(31, 31)
-    -- Pin the strata and level: modern minimaps re-layer their children,
-    -- which can leave the button drawn but under a frame that eats clicks.
+    -- Don't pin the strata or level: UI packs (e.g. EllesmereUI) move addon
+    -- buttons into their own pop-out and raise them above it.
     mmButton:SetFrameStrata("MEDIUM")
-    if mmButton.SetFixedFrameStrata then mmButton:SetFixedFrameStrata(true) end
     mmButton:SetFrameLevel(8)
-    if mmButton.SetFixedFrameLevel then mmButton:SetFixedFrameLevel(true) end
-    mmButton:EnableMouse(true)
     mmButton:RegisterForClicks("AnyUp")
     mmButton:RegisterForDrag("LeftButton")
     mmButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
@@ -434,6 +431,9 @@ local function createMinimapButton()
         if button == "RightButton" then KOS:OpenSettings() else KOS:ToggleUI() end
     end)
     mmButton:SetScript("OnDragStart", function(self)
+        -- Only drag around the minimap's edge while it's still ours; a UI
+        -- pack that has moved it into its own pop-out handles placement.
+        if self:GetParent() ~= Minimap then return end
         self:SetScript("OnUpdate", function()
             local mx, my = Minimap:GetCenter()
             local cx, cy = GetCursorPosition()
