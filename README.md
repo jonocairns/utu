@@ -26,7 +26,7 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 | `tests/harness.lua` | A mock of the WoW API that runs several clients on a shared message bus with a virtual clock. Set `H.forever = true` to mock WoW: Forever (no combat log, secret values via `H.SECRET`). |
 | `tests/run.lua` | The test suite. |
 | `build.sh` | Packages `dist/Utu-<version>.zip` and `dist/release.json`, and turns the top of `CHANGELOG.md` into `dist/notes.md` and `Utu/WhatsNew.lua`. |
-| `AGENTS.md` | Repo conventions and common pitfalls, for contributors and coding agents (`CLAUDE.md` points to it). |
+| `AGENTS.md` | Repo conventions and common pitfalls, for contributors and coding agents. |
 | `CHANGELOG.md` | What changed in each version, for players. The one source for release notes, WowUp's changelog and the in-game "What's new". |
 
 Run the tests with Lua 5.1:
