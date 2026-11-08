@@ -78,6 +78,7 @@ function KOS:Alert(key, T, how, isTest, seenAs)
     local lvl = T.virtual and 0 or self:LevelOf(T)
     local mine = not T.virtual and self:MyVote(T) ~= nil
     if not isTest then
+        if self:OnlyMutedMarks(T) then return end -- listed only by guildies you muted
         local now = GetTime()
         local arrived = not lastSeen[key] or now - lastSeen[key] > (S.cooldown or 180)
         lastSeen[key] = now
@@ -606,6 +607,7 @@ function KOS:UpdatePlate(unit)
     local plate = plates[unit]
     if not plate then return end
     local T = self.S.nameplate and self:ResolveUnit(unit)
+    if T and self:OnlyMutedMarks(T) then T = nil end
     if T then
         local ok, m = pcall(markFor, plate) -- protected plates (friendly in instances) refuse children
         if ok and m then
@@ -661,6 +663,7 @@ local function onTooltipUnit(tt)
     end
     tt:AddLine("|T" .. SKULL .. ":14|t |cffff2020Kill on Sight|r - " .. KOS:BountyTag(T)
         .. " |cffffd100(" .. (KOS:ClaimValue(T)) .. " pts to you)|r")
+    if KOS:OnlyMutedMarks(T) then tt:AddLine("Only marked by guildies you muted", 0.6, 0.6, 0.6) end
     local votes = KOS:ActiveVotes(T)
     for i = #votes, math.max(1, #votes - 2), -1 do
         local v = votes[i]

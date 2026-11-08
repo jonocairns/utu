@@ -18,6 +18,7 @@ globals = {
 
 -- WoW API and Blizzard globals Utu reads.
 read_globals = {
+    "MenuUtil",
     "ACCEPT", "BackdropTemplateMixin", "CANCEL", "COMBATLOG_OBJECT_TYPE_PLAYER", "C_AddOns",
     "C_ChatInfo", "C_DeathRecap", "C_GuildInfo", "C_Map", "C_NamePlate", "C_Timer",
     "CanBeRaidTarget", "CanEditGuildInfo", "CombatLogGetCurrentEventInfo", "CreateFrame",

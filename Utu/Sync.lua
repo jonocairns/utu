@@ -513,10 +513,10 @@ local function announceLive(kind, it, who)
         local T = KOS:GetTarget(it.key)
         if it.del then
             KOS:Notify("info", who .. " removed their mark on " .. KOS:Display(it.target)
-                .. ((T and T.on) and (" (now " .. KOS:BountyTag(T) .. ")") or ""))
+                .. ((T and T.on) and (" (now " .. KOS:BountyTag(T) .. ")") or ""), nil, it.by)
         else
             KOS:Notify("info", who .. " marked |cffff6060" .. KOS:Display(it.target) .. "|r - " .. KOS:BountyTag(T)
-                .. (it.note ~= "" and (": " .. it.note) or ""), true)
+                .. (it.note ~= "" and (": " .. it.note) or ""), true, it.by)
         end
     elseif kind == "death" then
         local T = KOS:Lookup(KOS:Canonical(it.killer))
@@ -702,8 +702,10 @@ function Sync:OnMessage(text, sender, isRetry)
         T.zone = (sub ~= "" and sub ~= zone) and (zone .. " - " .. sub) or zone
         T.seenBy = senderFull
         KOS:Notify(KOS:InMyZone(T.zone) and "nearby" or "info", KOS:Display(senderFull) .. " spotted |cffff6060"
-            .. KOS:Display(T.n) .. "|r (" .. KOS:BountyTag(T) .. ") in " .. T.zone)
-        if KOS.TrackSighting then KOS:TrackSighting(T, senderFull, T.zone) end
+            .. KOS:Display(T.n) .. "|r (" .. KOS:BountyTag(T) .. ") in " .. T.zone, nil, senderFull)
+        if KOS.TrackSighting and not KOS:IsMuted(senderFull) and not KOS:OnlyMutedMarks(T) then
+            KOS:TrackSighting(T, senderFull, T.zone)
+        end
         if KOS.RefreshUI then KOS:RefreshUI() end
     end
 end

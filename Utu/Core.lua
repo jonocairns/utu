@@ -238,13 +238,16 @@ end
 
 -- chatOnly: the event is already in the list data (a mark, gank, claim...),
 -- which the Activity tab reads directly, so it isn't added to the feed.
-function KOS:Notify(priority, text, chatOnly)
+-- by: the guildie the entry is about (sightings, marks), so muting them
+-- hides it.
+function KOS:Notify(priority, text, chatOnly, by)
     if not chatOnly then
         local feed = self:Feed()
-        table.insert(feed, 1, { t = GetServerTime(), p = priority, text = text })
+        table.insert(feed, 1, { t = GetServerTime(), p = priority, text = text, by = by })
         for i = #feed, 151, -1 do feed[i] = nil end
     end
     if self.OnFeed then self:OnFeed() end
+    if by and self:IsMuted(by) then return end
 
     local mode = self.S.chatter or "important"
     local show = priority == "me"
@@ -286,7 +289,7 @@ function KOS:Activity(limit)
     local list = self:List()
     for _, T in pairs(list.targets) do
         for _, v in pairs(T.votes or {}) do
-            if not v.del and not (T.cleared and v.t <= T.cleared.t) then
+            if not v.del and not (T.cleared and v.t <= T.cleared.t) and not self:IsMuted(v.by) then
                 add(v.t, isMe(v.by) and "me" or "info", who(v.by) .. " marked " .. red(T.n)
                     .. ((v.note and v.note ~= "") and (": " .. v.note) or ""))
             end
@@ -310,10 +313,58 @@ function KOS:Activity(limit)
         add(x.t, "info", who(x.by) .. " struck " .. self:Display(by) .. "'s claim on " .. self:Display(target))
     end
     if list.season then add(list.season.t, "big", who(list.season.by) .. " started a new bounty season") end
-    for _, e in ipairs(self:Feed()) do items[#items + 1] = e end
+    for _, e in ipairs(self:Feed()) do
+        if not (e.by and self:IsMuted(e.by)) then items[#items + 1] = e end
+    end
     table.sort(items, function(a, b) return a.t > b.t end)
     for i = #items, limit + 1, -1 do items[i] = nil end
     return items
+end
+
+-- Personal mute: guildies whose marks and sightings you don't want. Only
+-- changes what you see and get alerted on; bounties, points and the
+-- leaderboard stay the same for everyone (every client must agree on them).
+function KOS:IsMuted(name)
+    local muted = self.S and self.S.muted
+    if not muted or not next(muted) then return false end
+    local key = name and self:Canonical(name)
+    return key ~= nil and muted[key] ~= nil
+end
+
+function KOS:SetMuted(name, on)
+    local key, full = self:Canonical(name)
+    if not key then self:Print("Not a valid character name: " .. tostring(name)); return false end
+    if key == self:MyKey() then self:Print("You can't mute yourself."); return false end
+    self.S.muted[key] = on and full or nil
+    if on then
+        self:Print("Muted " .. self:Display(full) .. ": their marks won't alert you, and their marks and sightings"
+            .. " are hidden from your Activity and chat. Bounties and points don't change. /utu unmute "
+            .. self:Display(full) .. " to undo.")
+    else
+        self:Print("Unmuted " .. self:Display(full) .. ".")
+    end
+    if self.RefreshUI then self:RefreshUI() end
+    return true
+end
+
+function KOS:MutedList()
+    local out = {}
+    for _, full in pairs(self.S.muted) do out[#out + 1] = full end
+    table.sort(out)
+    return out
+end
+
+-- True when the only reason T is listed is marks from guildies you muted
+-- (no other marks, no ganks): no alerts, skulls or badges for them.
+function KOS:OnlyMutedMarks(T)
+    if not T or T.virtual or not next(self.S.muted) then return false end
+    local votes = self:ActiveVotes(T)
+    if #votes == 0 then return false end
+    for _, v in ipairs(votes) do
+        if not self:IsMuted(v.by) then return false end
+    end
+    local key = self:Canonical(T.n)
+    return not (key and #self:GanksBy(key) > 0)
 end
 
 -- Is a "Zone - Subzone" string in the zone I'm in?
@@ -541,6 +592,7 @@ function KOS:InitDB()
     end
     self.db = db
     self.S = db.settings
+    if type(db.settings.muted) ~= "table" then db.settings.muted = {} end -- key -> Name-Realm
     -- 0.6.9: marks, ganks and claims moved out of the feed (Activity reads
     -- them from the list); drop the copies older versions stored there
     if (db.feedVersion or 1) < 2 then
@@ -2129,6 +2181,7 @@ local HELP = {
     "/kos target [note] - mark your current target with a note",
     "/kos add Name [note] - mark a player by name (use quotes for names with spaces)",
     "/kos rm [Name] - remove your mark",
+    "/kos mute Name / unmute Name - ignore a guildie's marks and sightings (just for you); /kos mute lists them",
     "/kos pardon Name - clear everyone's marks (officers)",
     "/kos list [filter] - print the list",
     "/kos top - bounty hunter leaderboard",
@@ -2162,6 +2215,15 @@ local function onSlash(msg)
     elseif cmd == "rm" or cmd == "remove" or cmd == "unmark" then
         if rest == "" then rest = KOS:UnitFull("target") or "" end
         KOS:Unmark(rest)
+    elseif cmd == "mute" or cmd == "unmute" then
+        local name = rest:match('^"(.-)"') or rest
+        if name == "" then
+            local list = KOS:MutedList()
+            for i, full in ipairs(list) do list[i] = KOS:Display(full) end
+            KOS:Print(#list > 0 and ("Muted: " .. table.concat(list, ", ") .. ".") or "You haven't muted anyone. /utu mute Name")
+        else
+            KOS:SetMuted(name, cmd == "mute")
+        end
     elseif cmd == "pardon" then
         if rest == "" then rest = KOS:UnitFull("target") or "" end
         KOS:Pardon(rest)

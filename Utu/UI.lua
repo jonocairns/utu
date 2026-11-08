@@ -298,13 +298,35 @@ local function buildWanted()
         if T then KOS:Mark(T.n, d.myNote:GetText(), T.guid, T.class); d.myNote:ClearFocus() end
     end
     d.myNote:SetScript("OnEnterPressed", saveMine)
-    d.save = Button(d, "Mark", 120, saveMine)
+    d.save = Button(d, "Mark", 110, saveMine)
     d.save:SetPoint("BOTTOMLEFT", 12, 30)
-    d.unmark = Button(d, "Remove my mark", 130, function()
+    d.unmark = Button(d, "Remove my mark", 118, function()
         local T = selectedTarget()
         if T then KOS:Unmark(T.n) end
     end)
     d.unmark:SetPoint("LEFT", d.save, "RIGHT", 6, 0)
+    -- mute one of the guildies who marked this player (just for you)
+    d.mute = Button(d, "Mute...", 70, function(b)
+        local T = selectedTarget()
+        if not T then return end
+        local voters = {}
+        for _, v in ipairs(KOS:ActiveVotes(T)) do
+            if KOS:Canonical(v.by) ~= KOS:MyKey() then voters[#voters + 1] = v.by end
+        end
+        if #voters == 0 then KOS:Print("Only you have marked " .. KOS:Display(T.n) .. "."); return end
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then
+            KOS:Print("Type /utu mute Name to mute a guildie's marks.")
+            return
+        end
+        MenuUtil.CreateContextMenu(b, function(_, root)
+            root:CreateTitle("Mute marks and sightings from")
+            for _, by in ipairs(voters) do
+                root:CreateCheckbox(KOS:Display(by), function() return KOS:IsMuted(by) end,
+                    function() KOS:SetMuted(by, not KOS:IsMuted(by)) end)
+            end
+        end)
+    end)
+    d.mute:SetPoint("LEFT", d.unmark, "RIGHT", 6, 0)
     d.pardon = Button(d, "Pardon (clear all marks)", DETAIL_W - 24, function()
         local T = selectedTarget()
         if T then StaticPopup_Show("UTU_PARDON", KOS:Display(T.n), nil, T.n) end
@@ -339,7 +361,7 @@ local function refreshWanted()
 
     local d, T = wanted.d, selectedTarget()
     local show = T ~= nil
-    for _, w in ipairs({ d.title, d.subtitle, d.bar, d.value, d.body, d.myNoteLabel, d.myNote, d.save, d.unmark }) do
+    for _, w in ipairs({ d.title, d.subtitle, d.bar, d.value, d.body, d.myNoteLabel, d.myNote, d.save, d.unmark, d.mute }) do
         w:SetShown(show)
     end
     d.placeholder:SetShown(not show)
@@ -372,7 +394,7 @@ local function refreshWanted()
     for i = #votes, math.max(1, #votes - 4), -1 do
         local x = votes[i]
         lines[#lines + 1] = "  " .. KOS:Display(x.by) .. ": " .. (x.note ~= "" and x.note or "|cff777777marked|r")
-            .. " |cff777777" .. KOS.Ago(x.t) .. "|r"
+            .. " |cff777777" .. KOS.Ago(x.t) .. (KOS:IsMuted(x.by) and "  (muted)" or "") .. "|r"
     end
     if #votes > 5 then lines[#lines + 1] = "  |cff777777+" .. (#votes - 5) .. " more|r" end
     local ganks = KOS:GanksBy(KOS:Canonical(T.n))
@@ -393,6 +415,11 @@ local function refreshWanted()
     local mine = KOS:MyVote(T)
     d.save:SetText(mine and "Save & refresh" or "Add my mark")
     d.unmark:SetEnabled(mine ~= nil)
+    local others = false
+    for _, mark in ipairs(KOS:ActiveVotes(T)) do
+        if KOS:Canonical(mark.by) ~= KOS:MyKey() then others = true end
+    end
+    d.mute:SetEnabled(others)
     if wanted.noteSynced ~= sel.wanted and not d.myNote:HasFocus() then
         d.myNote:SetText(mine and mine.note or "")
         wanted.noteSynced = sel.wanted

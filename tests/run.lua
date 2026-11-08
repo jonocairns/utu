@@ -1422,5 +1422,46 @@ test("help banner wording follows the kind of call", function()
     eq(verbs[3], " is being ganked by ")
 end)
 
+test("muting a guildie hides their marks and sightings from you; bounties stay the same", function()
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    H.advance(20)
+    a.KOS.S.minLevel = 0
+    H.slash(a, "mute Bob")
+    assert(a.KOS:IsMuted("Bob-Forever"))
+    b.KOS:Mark("Spamtarget", "looked at me funny")
+    H.advance(2)
+    eq(level(a, "Spamtarget"), level(c, "Spamtarget"), "bounty is the same for everyone")
+    assert(not feedHas(a, "Bob marked"), "Bob's mark is hidden from Activity")
+    assert(feedHas(c, "Bob marked"), "only for Alice")
+    a.units.nameplate1 = { name = "Spamtarget", guid = "Player-1-0S1", level = 60 }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(#a.raidWarnings, 0, "no alert: only Bob marked them")
+    -- Bob's sightings stay out of Alice's Activity too
+    b.units.nameplate1 = { name = "Spamtarget", guid = "Player-1-0S1", level = 60 }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    assert(feedHas(c, "Bob spotted"), "Carol sees Bob's sighting")
+    assert(not feedHas(a, "Bob spotted"), "Alice doesn't")
+    -- once someone else marks them, alerts are back
+    c.KOS:Mark("Spamtarget", "")
+    H.advance(2)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(#a.raidWarnings, 1, "Carol's mark counts")
+    assert(feedHas(a, "Carol marked"))
+    -- a gank on record also counts, whoever marked them
+    b.KOS:Mark("Gankerx", "")
+    H.advance(2)
+    assert(a.KOS:OnlyMutedMarks(a.KOS:Lookup("gankerx-forever")))
+    a.KOS:MergeDeath({ victim = "Dave-Forever", killer = "Gankerx-Forever", t = math.floor(H.serverTime) - 10, zone = "" })
+    eq(a.KOS:OnlyMutedMarks(a.KOS:Lookup("gankerx-forever")), false, "ganks still alert")
+    -- undo, and you can't mute yourself
+    H.slash(a, "unmute Bob")
+    assert(feedHas(a, "Bob marked"), "unmuting brings Bob's marks back")
+    H.slash(a, "mute Alice")
+    eq(a.KOS:IsMuted("Alice-Forever"), false)
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

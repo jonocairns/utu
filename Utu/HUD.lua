@@ -76,6 +76,7 @@ function KOS:RefreshTargetBadge()
     local b = ensureBadge()
     if not b then return end
     local T = self.S.targetBadge and self:ResolveUnit("target")
+    if T and self:OnlyMutedMarks(T) then T = nil end
     b.T = T
     if T then
         b.icon:SetVertexColor(tierRGB(T))

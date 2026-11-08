@@ -150,7 +150,29 @@ function KOS:BuildSettings(parent)
     y = check("srcTarget", "Targeting", nil, COL1, y)
     y = check("srcMouseover", "Mouseover", "Can be chatty in busy places.", COL1, y)
     y = check("guildAlerts", "Skull on members of KoS guilds", nil, COL1, y)
-    check("guildBanners", "...and banner them too", "Off by default: a KoS guild can have a lot of members.", COL1, y)
+    y = check("guildBanners", "...and banner them too", "Off by default: a KoS guild can have a lot of members.", COL1, y)
+    y = y - 4
+    y = header("Muted guildies", COL1, y)
+    local mutedText = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    mutedText:SetPoint("TOPLEFT", COL1 + 4, y)
+    mutedText:SetWidth(COL2 - COL1 - 100)
+    mutedText:SetJustifyH("LEFT")
+    local unmuteAll = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    unmuteAll:SetSize(84, 20)
+    unmuteAll:SetPoint("TOPLEFT", COL2 - 92, y + 3)
+    unmuteAll:SetText("Unmute all")
+    unmuteAll:SetScript("OnClick", function()
+        wipe(KOS.S.muted)
+        KOS:Print("Unmuted everyone.")
+        if KOS.RefreshUI then KOS:RefreshUI() end
+    end)
+    controls[#controls + 1] = { refresh = function()
+        local list = KOS:MutedList()
+        for i, full in ipairs(list) do list[i] = KOS:Display(full) end
+        mutedText:SetText(#list > 0 and table.concat(list, ", ")
+            or "|cff888888Nobody. Use Mute... on a player's marks, or /utu mute Name.|r")
+        unmuteAll:SetEnabled(#list > 0)
+    end }
 
     -- column 2
     y = -28
