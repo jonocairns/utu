@@ -176,6 +176,22 @@ function KOS:Print(...)
     DEFAULT_CHAT_FRAME:AddMessage("|cffff3333Utu|r: " .. table.concat(parts, " "))
 end
 
+-- This addon's version ("0.7.4"), and that as a comparable number (nil if
+-- it isn't plain x.y.z).
+function KOS:Version()
+    local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    return get and get(ADDON, "Version") or "?"
+end
+
+function KOS.VersionNum(v)
+    if type(v) ~= "string" then return nil end
+    local a, b, c = v:match("^(%d+)%.(%d+)%.(%d+)$")
+    if not a then return nil end
+    a, b, c = tonumber(a), tonumber(b), tonumber(c)
+    if a > 99 or b > 999 or c > 999 then return nil end
+    return a * 1000000 + b * 1000 + c
+end
+
 -- Trim a string to at most `max` bytes without splitting a UTF-8 character.
 function KOS.Utf8Truncate(s, max)
     if #s <= max then return s end
@@ -582,8 +598,12 @@ end
 ------------------------------------------------------------------------
 
 function KOS:InitDB()
+    local upgrading = UtuDB ~= nil
     UtuDB = UtuDB or {}
     local db = UtuDB
+    -- Version the "What's new" message last covered. Saved data from before
+    -- 0.7.4 (which added it) gets 0.7.3, so they hear about 0.7.4.
+    if db.seenVersion == nil and upgrading then db.seenVersion = "0.7.3" end
     db.lists = db.lists or {}
     db.charGuild = db.charGuild or {}
     db.settings = db.settings or {}
@@ -2230,6 +2250,7 @@ local HELP = {
     "/kos sos - call nearby guildies for help against your target or attacker",
     "/kos probe - test what this client allows (saved for troubleshooting)",
     "/kos test - show a test alert",
+    "/kos news [version] - what changed in this version, or since the one given",
 }
 
 local function onSlash(msg)
@@ -2318,6 +2339,8 @@ local function onSlash(msg)
         else KOS:NewSeason() end -- prints the permission message
     elseif cmd == "config" or cmd == "options" or cmd == "settings" then
         KOS:OpenSettings()
+    elseif cmd == "news" or cmd == "changes" then
+        KOS:ShowNews(rest ~= "" and rest or nil)
     elseif cmd == "sync" then
         if ns.Sync then ns.Sync:Status(); ns.Sync:Hello(true) end
     elseif cmd == "probe" then
@@ -2453,6 +2476,72 @@ KOS:On("GUILD_ROSTER_UPDATE", function()
     KOS:InvalidateListKey()
     KOS:RefreshRoster()
     if KOS:ListKey() ~= before then KOS:Changed() end
+end)
+
+------------------------------------------------------------------------
+-- What's new: KOS.CHANGES (WhatsNew.lua, generated from CHANGELOG.md) holds
+-- each version's notes, newest first. The first login on a newer version
+-- prints what changed since the last one this account saw.
+------------------------------------------------------------------------
+
+KOS.NEWS_MAX = 6 -- bullets in chat; the rest point at the changelog
+KOS.CHANGELOG_URL = KOS.HOME_URL .. "/blob/main/CHANGELOG.md"
+
+-- Notes for versions newer than `since` and no newer than this one.
+function KOS:ChangesSince(since)
+    local from, upto = self.VersionNum(since) or 0, self.VersionNum(self:Version()) or math.huge
+    local out = {}
+    for _, c in ipairs(self.CHANGES or {}) do
+        local n = self.VersionNum(c[1])
+        if n and n > from and n <= upto then out[#out + 1] = c end
+    end
+    return out
+end
+
+-- `since` nil: just the current version's notes (/utu news).
+function KOS:ShowNews(since)
+    local changes = self:ChangesSince(since)
+    if not since then
+        local mine = self:Version()
+        changes = {}
+        for _, c in ipairs(self.CHANGES or {}) do
+            if c[1] == mine then changes = { c } end
+        end
+        if #changes == 0 and self.CHANGES and self.CHANGES[1] then changes = { self.CHANGES[1] } end
+    end
+    if #changes == 0 then
+        self:Print("Nothing new since " .. tostring(since) .. ". Full changelog: " .. self.CHANGELOG_URL)
+        return
+    end
+    local newest = changes[1][1]
+    if #changes == 1 then
+        self:Print("What's new in " .. newest .. ":")
+    else
+        self:Print("Updated to " .. newest .. ". What's new since " .. since .. ":")
+    end
+    local shown, total = 0, 0
+    for _, c in ipairs(changes) do
+        for _, line in ipairs(c[2]) do
+            total = total + 1
+            if shown < self.NEWS_MAX then
+                shown = shown + 1
+                DEFAULT_CHAT_FRAME:AddMessage("  - " .. line)
+            end
+        end
+    end
+    if total > shown then
+        DEFAULT_CHAT_FRAME:AddMessage("  ...and " .. (total - shown) .. " more: " .. self.CHANGELOG_URL)
+    end
+end
+
+KOS:On("PLAYER_LOGIN", function()
+    local mine = KOS:Version()
+    local now, seen = KOS.VersionNum(mine), KOS.VersionNum(KOS.db.seenVersion)
+    if not now then return end
+    local since = KOS.db.seenVersion
+    KOS.db.seenVersion = mine
+    -- after the login chat spam, so it isn't scrolled away
+    if seen and seen < now then C_Timer.After(10, function() KOS:ShowNews(since) end) end
 end)
 
 -- Marks expire with time, so recount now and then.

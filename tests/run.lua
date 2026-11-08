@@ -1466,5 +1466,51 @@ test("muting a guildie hides their marks and sightings from you; bounties stay t
     assert(a.KOS:IsMuted("Bob-Forever"), "muted from the name box")
 end)
 
+test("what's new: shown once after an update, never on a fresh install", function()
+    local function newsLines(c)
+        local n = 0
+        for _, l in ipairs(c.chat) do -- header lines only, not the bullets
+            if l:find("Utu|r: What's new in", 1, true) or l:find("What's new since", 1, true) then n = n + 1 end
+        end
+        return n
+    end
+    -- the generated notes are current: the newest section is this version
+    local toc = io.open("Utu/Utu.toc"):read("*a")
+    local tocVersion = toc:match("## Version: ([%d%.]+)")
+    local a = H.newClient("Alice", { version = tocVersion })
+    eq(a.KOS.CHANGES[1][1], tocVersion, "CHANGELOG.md's top section matches the toc (run ./build.sh)")
+    for _, c in ipairs(a.KOS.CHANGES) do
+        assert(a.KOS.VersionNum(c[1]), "version " .. tostring(c[1]))
+        assert(#c[2] > 0, c[1] .. " has notes")
+    end
+    H.advance(30)
+    eq(newsLines(a), 0, "fresh install: no news")
+    eq(a.KOS.db.seenVersion, tocVersion)
+    -- saved data from before 0.7.4 counts as 0.7.3
+    local b = H.newClient("Bob", { version = "0.7.4", db = { lists = {} } })
+    H.advance(30)
+    eq(newsLines(b), 1, "told about 0.7.4")
+    assert(H.chatContains(b, "/utu news shows it again"))
+    eq(b.KOS.db.seenVersion, "0.7.4")
+    -- logging in again on the same version: nothing
+    b = H.relogin(b)
+    H.advance(30)
+    eq(newsLines(b), 0, "only once")
+    -- skipping versions lists everything since, capped, newest first
+    local c = H.newClient("Carol", { version = "0.7.4", db = { lists = {}, seenVersion = "0.6.0" } })
+    H.advance(30)
+    assert(H.chatContains(c, "Updated to 0.7.4. What's new since 0.6.0:"))
+    local bullets = 0
+    for _, l in ipairs(c.chat) do if l:sub(1, 4) == "  - " then bullets = bullets + 1 end end
+    eq(bullets, c.KOS.NEWS_MAX)
+    assert(H.chatContains(c, "CHANGELOG.md"), "points at the full changelog")
+    -- notes for versions newer than the one installed aren't shown
+    eq(#c.KOS:ChangesSince("0.7.3"), 1)
+    -- /utu news: this version's notes
+    local before = newsLines(a)
+    H.slash(a, "news")
+    eq(newsLines(a), before + 1)
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -66,5 +66,6 @@ The tab can also start the next season early. Its **claims review** flags `farm?
 - Guild names can only be read from visible players.
 - Healers don't land killing blows, so they mostly score through assists (on Forever, honour credit pays them too).
 - Forever hides some information from addons. `/kos probe` (best with an enemy player targeted) tests what your client allows and saves the results; the Settings tab shows a summary at the top right.
+- What changed? The first login after an update lists it in chat; `/utu news` shows it again, and the full list is in [CHANGELOG.md](../CHANGELOG.md).
 - Marks not reaching a guildie? `/utu sync` shows what was sent and received this session and which guildies (and versions) you've heard from, then asks everyone online to compare lists. Both of you need to be online, and versions before 0.5.0 can't receive names with spaces.
 - Forever names can have spaces. Type them as they are in the window, or use quotes in slash commands: `/kos add "Kind Eyes" camps the flight path`.

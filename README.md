@@ -25,7 +25,8 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 | `.luacheckrc` | Lint config. |
 | `tests/harness.lua` | A mock of the WoW API that runs several clients on a shared message bus with a virtual clock. Set `H.forever = true` to mock WoW: Forever (no combat log, secret values via `H.SECRET`). |
 | `tests/run.lua` | The test suite. |
-| `build.sh` | Packages `dist/Utu-<version>.zip`. |
+| `build.sh` | Packages `dist/Utu-<version>.zip` and `dist/release.json`, and turns the top of `CHANGELOG.md` into `dist/notes.md` and `Utu/WhatsNew.lua`. |
+| `CHANGELOG.md` | What changed in each version, for players. The one source for release notes, WowUp's changelog and the in-game "What's new". |
 
 Run the tests with Lua 5.1:
 
@@ -46,9 +47,11 @@ WoW: Forever runs on the Midnight engine: no combat log for addons, and some uni
 
 ### Releasing
 
-1. Bump `## Version:` in `Utu/Utu.toc`.
-2. Tag the commit to match the version, e.g. `git tag v0.6.3 && git push --tags`.
-3. CI runs the tests, builds the zip and `release.json`, and attaches both to a GitHub release. (By hand: `./build.sh`, then `gh release create v0.6.3 dist/Utu-0.6.3.zip dist/release.json`.)
+1. Bump `## Version:` in `Utu/Utu.toc` and add a matching `## x.y.z` section at the top of `CHANGELOG.md`: short bullets written for players.
+2. Run `./build.sh`. It refuses to build if the changelog's top section isn't this version, and regenerates `Utu/WhatsNew.lua`; commit that with the release (the tests check it's current).
+3. Tag the commit to match the version and publish: `git tag v0.7.4 && git push --tags`, then `gh release create v0.7.4 dist/Utu-0.7.4.zip dist/release.json --notes-file dist/notes.md`.
+
+WowUp shows the release's notes as the changelog, but only the latest release's, so players skipping versions see the rest in game: the first login on a new version prints what changed since the last one they ran (`/utu news` repeats it).
 
 WowUp only offers a release to a Forever install if `release.json` lists the zip under the `forever` flavour, so always attach it. WowUp checks the five newest releases.
 

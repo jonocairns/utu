@@ -40,10 +40,7 @@ local Sync = {}
 ns.Sync = Sync
 KOS.Sync = Sync
 
-local function addonVersion()
-    local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-    return get and get(ADDON, "Version") or "?"
-end
+local function addonVersion() return KOS:Version() end
 
 -- Sync diagnostics, saved to UtuDB.diag.sync and shown by /utu sync.
 -- Counters are for this session; guildies heard from are kept.
@@ -267,14 +264,7 @@ function Sync:QueueSize() return #hi + #lo end
 ------------------------------------------------------------------------
 
 -- "0.6.3" -> a comparable number, or nil
-local function versionNum(v)
-    if type(v) ~= "string" then return nil end
-    local a, b, c = v:match("^(%d+)%.(%d+)%.(%d+)$")
-    if not a then return nil end
-    a, b, c = tonumber(a), tonumber(b), tonumber(c)
-    if a > 99 or b > 999 or c > 999 then return nil end
-    return a * 1000000 + b * 1000 + c
-end
+local versionNum = KOS.VersionNum
 Sync.versionNum = versionNum
 
 local newestSeen
