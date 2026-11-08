@@ -652,7 +652,7 @@ local function buildActivity()
 end
 
 local function refreshActivity()
-    activity.list:Update(KOS:Feed())
+    activity.list:Update(KOS:Activity())
 end
 
 function KOS:OnFeed()
@@ -946,10 +946,16 @@ function KOS:RefreshUI()
     end
     local g = IsInGuild() and GetGuildInfo("player")
     f.title:SetText("Utu  |cff888888" .. (g and ("<" .. g .. ">") or "personal list") .. "|r")
+    self:UpdateFooter()
+    REFRESH[current]()
+end
+
+-- Just the footer: called as sync messages go out, so the count stays live.
+function KOS:UpdateFooter()
+    if not f or not f:IsShown() then return end
     local q = self.Sync and self.Sync:QueueSize() or 0
     f.footer:SetText(q > 0 and ("|cffffd100Syncing with guildies (" .. q .. " left)|r")
         or (self:IsGuildList() and "Synced with online guildies" or "Not in a guild: this list is just yours"))
-    REFRESH[current]()
 end
 
 function KOS:ShowUI(tab)

@@ -235,10 +235,14 @@ function KOS:Feed()
     return self.db.feeds[key]
 end
 
-function KOS:Notify(priority, text)
-    local feed = self:Feed()
-    table.insert(feed, 1, { t = GetServerTime(), p = priority, text = text })
-    for i = #feed, 151, -1 do feed[i] = nil end
+-- chatOnly: the event is already in the list data (a mark, gank, claim...),
+-- which the Activity tab reads directly, so it isn't added to the feed.
+function KOS:Notify(priority, text, chatOnly)
+    if not chatOnly then
+        local feed = self:Feed()
+        table.insert(feed, 1, { t = GetServerTime(), p = priority, text = text })
+        for i = #feed, 151, -1 do feed[i] = nil end
+    end
     if self.OnFeed then self:OnFeed() end
 
     local mode = self.S.chatter or "important"
@@ -264,6 +268,51 @@ function KOS:Notify(priority, text)
         chatTimes[#chatTimes + 1] = now
     end
     self:Print(text)
+end
+
+-- The Activity tab: everything in the list itself (marks, pardons, ganks,
+-- claims, struck claims, season resets), however it arrived (live, or
+-- synced later), plus the feed of things that only exist as events
+-- (sightings, help calls, rank-ups). Newest first.
+function KOS:Activity(limit)
+    limit = limit or 150
+    local items, me = {}, self:MyKey()
+    local function add(t, p, text) if type(t) == "number" then items[#items + 1] = { t = t, p = p, text = text } end end
+    local function isMe(name) return name and self:Canonical(name) == me end
+    local function who(name) return isMe(name) and "You" or self:Display(name) end
+    local function red(name) return "|cffff6060" .. self:Display(name) .. "|r" end
+    local function where(zone) return (zone and zone ~= "") and (" in " .. zone) or "" end
+    local list = self:List()
+    for _, T in pairs(list.targets) do
+        for _, v in pairs(T.votes or {}) do
+            if not v.del and not (T.cleared and v.t <= T.cleared.t) then
+                add(v.t, isMe(v.by) and "me" or "info", who(v.by) .. " marked " .. red(T.n)
+                    .. ((v.note and v.note ~= "") and (": " .. v.note) or ""))
+            end
+        end
+        if T.cleared then add(T.cleared.t, "info", who(T.cleared.by) .. " pardoned " .. self:Display(T.n)) end
+    end
+    for _, d in pairs(list.deaths) do
+        add(d.t, isMe(d.victim) and "me" or "info", (isMe(d.victim) and "You were" or (self:Display(d.victim) .. " was"))
+            .. " killed by " .. red(d.killer) .. where(d.zone))
+    end
+    for _, k in pairs(list.kills) do
+        local helped = (k.rev and (", avenging " .. (isMe(k.rev) and "you" or self:Display(k.rev))))
+            or (k.res and (", rescuing " .. (isMe(k.res) and "you" or self:Display(k.res)))) or ""
+        local v = tonumber(k.v) or 0
+        add(k.t, (isMe(k.by) or isMe(k.rev) or isMe(k.res)) and "me" or "big",
+            "|cff40ff40" .. who(k.by) .. "|r" .. (k.assist and " assisted on " or " claimed the bounty on ")
+            .. self:Display(k.target) .. helped .. " (+" .. v .. (v == 1 and " point)" or " points)") .. where(k.zone))
+    end
+    for id, x in pairs(list.struck) do
+        local by, target = strsplit("|", id)
+        add(x.t, "info", who(x.by) .. " struck " .. self:Display(by) .. "'s claim on " .. self:Display(target))
+    end
+    if list.season then add(list.season.t, "big", who(list.season.by) .. " started a new bounty season") end
+    for _, e in ipairs(self:Feed()) do items[#items + 1] = e end
+    table.sort(items, function(a, b) return a.t > b.t end)
+    for i = #items, limit + 1, -1 do items[i] = nil end
+    return items
 end
 
 -- Is a "Zone - Subzone" string in the zone I'm in?
@@ -491,6 +540,20 @@ function KOS:InitDB()
     end
     self.db = db
     self.S = db.settings
+    -- 0.6.9: marks, ganks and claims moved out of the feed (Activity reads
+    -- them from the list); drop the copies older versions stored there
+    if (db.feedVersion or 1) < 2 then
+        local derived = { " marked ", " was killed by ", " claimed the bounty on ", " pardoned ", " assisted on ",
+            " struck a bounty claim", " started a new bounty season" }
+        for _, feed in pairs(db.feeds or {}) do
+            for i = #feed, 1, -1 do
+                for _, pat in ipairs(derived) do
+                    if type(feed[i].text) == "string" and feed[i].text:find(pat, 1, true) then table.remove(feed, i); break end
+                end
+            end
+        end
+        db.feedVersion = 2
+    end
 
     for _, list in pairs(db.lists) do
         -- migrate 0.1.x (one record per player) to per-guildie marks

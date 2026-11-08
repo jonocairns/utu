@@ -56,7 +56,7 @@ local function jumpDays(days)
     for _, c in ipairs(H.clients) do if c.online then c.KOS:RecalcAll(); c.KOS:InvalidateGuildStats() end end
 end
 local function feedHas(c, needle)
-    for _, e in ipairs(c.KOS:Feed()) do if e.text:find(needle, 1, true) then return true end end
+    for _, e in ipairs(c.KOS:Activity()) do if e.text:find(needle, 1, true) then return true end end
     return false
 end
 
@@ -1345,6 +1345,32 @@ test("forever: two-word names the game splits into name and realm are put back t
     H.advance(20)
     H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, "S\tv\tSqwert-Sqwert\tBob-Forever\t" .. math.floor(H.serverTime) .. "\t0\t\t\t", "GUILD", "Bob-Forever")
     assert(K:Lookup("sqwert sqwert-forever"), "incoming split name stored whole")
+end)
+
+test("activity shows marks and ganks that arrived by sync, your own marks, and no duplicates", function()
+    local b = H.newClient("Bob")
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "camps the flight path")
+    H.advance(2)
+    -- Alice wasn't online for that: it reaches her in a dump
+    local a = H.newClient("Alice", { db = { feeds = { ["Gankbusters-Forever"] = {
+        { t = 1, p = "info", text = "Old marked |cffff6060Someone|r - Suspect" },
+        { t = 2, p = "nearby", text = "Carol spotted Someone in Duskwood" },
+    } } } })
+    H.advance(30)
+    local function count(c, needle)
+        local n = 0
+        for _, e in ipairs(c.KOS:Activity()) do if e.text:find(needle, 1, true) then n = n + 1 end end
+        return n
+    end
+    eq(count(a, "Bob marked"), 1, "synced mark shows up")
+    eq(count(a, "camps the flight path"), 1)
+    a.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    eq(count(a, "You marked"), 1, "your own mark shows up")
+    eq(count(b, "Alice marked"), 1, "a live mark shows once, not twice")
+    eq(count(a, "Old marked"), 0, "copies old versions kept in the feed are dropped")
+    eq(count(a, "spotted Someone"), 1, "event-only entries are kept")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

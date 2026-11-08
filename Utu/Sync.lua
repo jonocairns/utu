@@ -227,6 +227,7 @@ local function pump()
         return
     end
     if sendRaw(q[1]) then table.remove(q, 1) end -- else throttled: retry next tick
+    if KOS.UpdateFooter then KOS:UpdateFooter() end
 end
 
 local function enqueue(q, msg)
@@ -496,19 +497,19 @@ local function announceLive(kind, it, who)
                 .. ((T and T.on) and (" (now " .. KOS:BountyTag(T) .. ")") or ""))
         else
             KOS:Notify("info", who .. " marked |cffff6060" .. KOS:Display(it.target) .. "|r - " .. KOS:BountyTag(T)
-                .. (it.note ~= "" and (": " .. it.note) or ""))
+                .. (it.note ~= "" and (": " .. it.note) or ""), true)
         end
     elseif kind == "death" then
         local T = KOS:Lookup(KOS:Canonical(it.killer))
         KOS:Notify(KOS:InMyZone(it.zone) and "nearby" or "info",
             who .. " was killed by |cffff6060" .. KOS:Display(it.killer) .. "|r"
             .. (it.zone ~= "" and (" in " .. it.zone) or "")
-            .. (T and (" - now " .. KOS:BountyTag(T)) or "") .. " |cffff8000(revenge bonus for an hour)|r")
+            .. (T and (" - now " .. KOS:BountyTag(T)) or "") .. " |cffff8000(revenge bonus for an hour)|r", true)
     elseif kind == "clear" then
-        KOS:Notify("info", who .. " pardoned " .. KOS:Display(it.target) .. ".")
+        KOS:Notify("info", who .. " pardoned " .. KOS:Display(it.target) .. ".", true)
     elseif kind == "kill" then
         if it.assist then
-            if it.v > 0 then KOS:Notify("info", who .. " assisted on " .. KOS:Display(it.target) .. " (+" .. it.v .. ")") end
+            if it.v > 0 then KOS:Notify("info", who .. " assisted on " .. KOS:Display(it.target) .. " (+" .. it.v .. ")", true) end
             return
         end
         local pts = KOS:PointsOf(it.by)
@@ -519,11 +520,11 @@ local function announceLive(kind, it, who)
         local prio = (aboutMe(helped) and "me") or ((T and KOS:IsTopBounty(T)) and "big") or "info"
         KOS:Notify(prio, "|cff40ff40" .. who .. "|r (" .. KOS.RankTag(pts) .. ") claimed the bounty on "
             .. KOS:Display(it.target) .. rev .. " - +" .. it.v .. (it.v == 1 and " point" or " points")
-            .. (it.zone ~= "" and (" in " .. it.zone) or ""))
+            .. (it.zone ~= "" and (" in " .. it.zone) or ""), true)
     elseif kind == "strike" then
-        KOS:Notify("info", who .. " struck a bounty claim (" .. it.id:gsub("|%d+$", ""):gsub("|", " on ") .. ").")
+        KOS:Notify("info", who .. " struck a bounty claim (" .. it.id:gsub("|%d+$", ""):gsub("|", " on ") .. ").", true)
     elseif kind == "season" then
-        KOS:Notify("big", who .. " started a new bounty season. The leaderboard has been reset.")
+        KOS:Notify("big", who .. " started a new bounty season. The leaderboard has been reset.", true)
     end
 end
 
