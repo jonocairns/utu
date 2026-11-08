@@ -10,7 +10,9 @@ Open it with `/utu` (or `/kos`), the minimap button, or the addons dropdown next
 
 ## Install
 
-Copy `Utu` into `World of Warcraft/<client>/Interface/AddOns/`.
+**With WowUp (updates itself):** in WowUp, pick your WoW: Forever install, go to **Get Addons → Install from URL**, paste `https://github.com/jonocairns/utu` and install. Then turn on **Auto update** for Utu in My Addons (WowUp leaves it off for Forever by default).
+
+**By hand:** download the zip from [Releases](https://github.com/jonocairns/utu/releases/latest) and unzip it into `World of Warcraft/_forever_/Interface/AddOns/`, so you end up with `Interface/AddOns/Utu/Utu.toc`.
 
 If the addon list shows it as *Incompatible* or *out of date*, run `/dump (select(4, GetBuildInfo()))` in game and put the number it prints on the `## Interface:` line of `Utu.toc`. (Forever 1.60.1 is `16001`.)
 

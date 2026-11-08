@@ -10,7 +10,9 @@ Guildies mark gankers, bounties grow with marks and ganks and cool off over time
 
 ## Install
 
-Download the zip from [Releases](../../releases) and unzip it into `World of Warcraft/<client>/Interface/AddOns/`, so you end up with `Interface/AddOns/Utu/Utu.toc`.
+**With WowUp (updates itself):** in WowUp, pick your WoW: Forever install, go to **Get Addons → Install from URL**, paste `https://github.com/jonocairns/utu` and install. Then turn on **Auto update** for Utu in My Addons (WowUp leaves it off for Forever by default).
+
+**By hand:** download the zip from [Releases](https://github.com/jonocairns/utu/releases/latest) and unzip it into `World of Warcraft/_forever_/Interface/AddOns/`, so you end up with `Interface/AddOns/Utu/Utu.toc`.
 
 ## Development
 
@@ -35,8 +37,10 @@ WoW: Forever runs on the Midnight engine: no combat log for addons, and some uni
 ### Releasing
 
 1. Bump `## Version:` in `Utu/Utu.toc`.
-2. Tag the commit to match the version, e.g. `git tag v0.4.0 && git push --tags`.
-3. CI runs the tests, builds the zip and attaches it to a GitHub release.
+2. Tag the commit to match the version, e.g. `git tag v0.6.3 && git push --tags`.
+3. CI runs the tests, builds the zip and `release.json`, and attaches both to a GitHub release. (By hand: `./build.sh`, then `gh release create v0.6.3 dist/Utu-0.6.3.zip dist/release.json`.)
+
+WowUp only offers a release to a Forever install if `release.json` lists the zip under the `forever` flavour, so always attach it. WowUp checks the five newest releases.
 
 ## Licence
 
