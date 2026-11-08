@@ -1038,9 +1038,19 @@ function KOS:RequestRoster()
     elseif GuildRoster then GuildRoster() end
 end
 
+-- The guild info text, read live out of combat and cached for combat: on
+-- Forever, reading it in combat (e.g. from a tooltip) is a blocked action.
+function KOS:GuildInfoText()
+    if GetGuildInfoText and not (InCombatLockdown and InCombatLockdown()) then
+        local ok, text = pcall(GetGuildInfoText)
+        if ok and not KOS.IsSecret(text) then self.guildInfoCache = type(text) == "string" and text or "" end
+    end
+    return self.guildInfoCache or ""
+end
+
 function KOS:GuildTag(tag)
     if not IsInGuild() then return nil end
-    local info = (GetGuildInfoText and GetGuildInfoText() or ""):lower()
+    local info = self:GuildInfoText():lower()
     local n = info:match("kos:%s*" .. tag .. "%s*=%s*(%d+)")
     return n and tonumber(n) or nil
 end
@@ -1083,7 +1093,7 @@ function KOS:SetGuildRule(tag, value)
         self:Print("You don't have permission to edit the guild information.")
         return false
     end
-    local info = GetGuildInfoText and GetGuildInfoText() or ""
+    local info = self:GuildInfoText()
     local pattern = "[Kk][Oo][Ss]:%s*" .. tag .. "%s*=%s*%d+"
     local repl = value and ("KOS:" .. tag .. "=" .. value) or ""
     local newInfo, n = info:gsub(pattern, repl, 1)

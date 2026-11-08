@@ -406,9 +406,14 @@ local function createMinimapButton()
     if mmButton or not Minimap then return end
     mmButton = CreateFrame("Button", "UtuMinimapButton", Minimap)
     mmButton:SetSize(31, 31)
+    -- Pin the strata and level: modern minimaps re-layer their children,
+    -- which can leave the button drawn but under a frame that eats clicks.
     mmButton:SetFrameStrata("MEDIUM")
+    if mmButton.SetFixedFrameStrata then mmButton:SetFixedFrameStrata(true) end
     mmButton:SetFrameLevel(8)
-    mmButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    if mmButton.SetFixedFrameLevel then mmButton:SetFixedFrameLevel(true) end
+    mmButton:EnableMouse(true)
+    mmButton:RegisterForClicks("AnyUp")
     mmButton:RegisterForDrag("LeftButton")
     mmButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 

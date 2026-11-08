@@ -1241,5 +1241,21 @@ test("forever: a group gank can be reported against several players", function()
     assert(b.KOS:Lookup("gankone-forever") and b.KOS:Lookup("ganktwo-forever"), "both marked")
 end)
 
+test("guild rules are read from a cache in combat, where reading guild info is blocked", function()
+    H.guild.info = "KOS:season=2"
+    local a = H.newClient("Alice")
+    H.advance(5)
+    eq(a.KOS:GuildTag("season"), 2)
+    H.combat = true
+    local reads = 0
+    local real = a.env.GetGuildInfoText
+    a.env.GetGuildInfoText = function() reads = reads + 1; return real() end
+    H.guild.info = "KOS:season=4"
+    eq(a.KOS:GuildTag("season"), 2, "combat uses the cached text")
+    eq(reads, 0, "no guild info read in combat")
+    H.combat = false
+    eq(a.KOS:GuildTag("season"), 4, "out of combat it's read live again")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
