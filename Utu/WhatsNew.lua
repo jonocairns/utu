@@ -1,6 +1,9 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.8.1", {
+        "Fixed marking and syncing erroring after a /reload straight onto 0.8.0. Restart the game once (not just /reload) to switch signing on.",
+    } },
     { "0.8.0", {
         "|cffffd100Signed marks and claims:|r your marks, removals and claims now carry a signature only your computer can make. If a game crash loses them from your saved data, they come back from guildies without a false \"Possible forgery\" warning, and a forger still can't fake one.",
     } },

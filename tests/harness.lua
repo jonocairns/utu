@@ -359,9 +359,12 @@ function H.newClient(name, opts)
 
     local ns = {}
     for _, f in ipairs(FILES) do
-        local chunk = assert(loadfile(ADDON_DIR .. f))
-        setfenv(chunk, env)
-        chunk("Utu", ns)
+        -- opts.missing: files a /reload after an update can't see yet
+        if not (opts.missing and opts.missing[f]) then
+            local chunk = assert(loadfile(ADDON_DIR .. f))
+            setfenv(chunk, env)
+            chunk("Utu", ns)
+        end
     end
     c.KOS = ns.KOS
     c.Sync = ns.Sync

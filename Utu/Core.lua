@@ -1128,6 +1128,20 @@ end
 
 KOS.FLAGS_KEPT = 30
 
+-- Signing (Sign.lua) replaces these. WoW only finds files an update adds
+-- after a full game restart, so a /reload straight after updating to a
+-- version with a new file runs without it: these keep marking and sync
+-- working, just unsigned, until then. New files need the same care.
+function KOS:SignVote() return nil end
+function KOS:SignKill() return nil end
+function KOS:VerifyVote() return false end
+function KOS:VerifyKill() return false end
+
+-- A tag as it appears in a message: "1" and 16 hex digits, else nil.
+function KOS.CleanSig(s)
+    return (type(s) == "string" and #s == 17 and s:match("^1%x+$")) and s or nil
+end
+
 -- This character's record for the current guild list (nil outside a guild
 -- or before the guild loads). Created on first use, seeded from my items
 -- already in the list so they don't look unknown.

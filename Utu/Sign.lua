@@ -246,8 +246,3 @@ function KOS:VerifyKill(it)
     return valid(it.sig, self.KillSigText(lk, self:Canonical(it.by), self:Canonical(it.target), it.t, claimValue(it.v)),
         self:SigKeys())
 end
-
--- A tag as it appears in a message: "1" and 16 hex digits, else nil.
-function KOS.CleanSig(s)
-    return (type(s) == "string" and #s == 17 and s:match("^1%x+$")) and s or nil
-end

@@ -5,6 +5,9 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.8.1
+- Fixed marking and syncing erroring after a `/reload` straight onto 0.8.0. Restart the game once (not just `/reload`) to switch signing on.
+
 ## 0.8.0
 - **Signed marks and claims:** your marks, removals and claims now carry a signature only your computer can make. If a game crash loses them from your saved data, they come back from guildies without a false "Possible forgery" warning, and a forger still can't fake one.
 

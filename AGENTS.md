@@ -14,6 +14,7 @@
 - Add a test for each feature and each bug fix.
 - The harness can't catch taint, missing templates, text overflow or real API differences. When handing work back, list what still needs checking in game.
 - Guard APIs the harness lacks (`MenuUtil`, `Menu`) with a fallback.
+- WoW only loads files added by an update after a full restart, not a `/reload`. Code in a new file must be optional (stand-ins in `Core.lua`, tested with `missing` in the harness), and the changelog should say to restart.
 - Add new WoW globals to `.luacheckrc`; don't silence warnings inline.
 
 ## Forever quirks
