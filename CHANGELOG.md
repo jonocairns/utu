@@ -5,6 +5,10 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.7.9
+- **Two-word names fixed:** Utu knew players with a two-word name (like "Yeh Neh") by their first word only. Their own help calls popped up for them, and their marks, removals, claims and pardons only reached guildies at the next full sync. Existing marks, claims and mutes move to the whole name when you log in.
+- **Everyone should update:** older versions count an updated guildie's marks and claims twice until they do.
+
 ## 0.7.8
 - **Forgery check:** if a sync brings in a mark, mark removal or bounty claim in your name that you never made, Utu warns you ("Possible forgery"), names the guildie whose sync relayed it, and lists it in `/utu sync`. Re-add a removed mark with `/utu add`; tell an officer about claims.
 

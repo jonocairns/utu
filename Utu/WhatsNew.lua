@@ -1,6 +1,10 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.7.9", {
+        "|cffffd100Two-word names fixed:|r Utu knew players with a two-word name (like \"Yeh Neh\") by their first word only. Their own help calls popped up for them, and their marks, removals, claims and pardons only reached guildies at the next full sync. Existing marks, claims and mutes move to the whole name when you log in.",
+        "|cffffd100Everyone should update:|r older versions count an updated guildie's marks and claims twice until they do.",
+    } },
     { "0.7.8", {
         "|cffffd100Forgery check:|r if a sync brings in a mark, mark removal or bounty claim in your name that you never made, Utu warns you (\"Possible forgery\"), names the guildie whose sync relayed it, and lists it in /utu sync. Re-add a removed mark with /utu add; tell an officer about claims.",
     } },

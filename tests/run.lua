@@ -1803,5 +1803,191 @@ test("forgery check edge cases: old claims, pardons, far-ahead forged removals",
     assert(not bv.del, "and Bob has it")
 end)
 
+test("forever: a two-word player knows their own name (no help calls to yourself)", function()
+    H.forever = true
+    local y, b = H.newClient("Yeh Neh"), H.newClient("Bob")
+    H.advance(20)
+    local K = y.KOS
+    eq(K:MyName(), "Yeh Neh-Forever", "whole name, though the game splits it")
+    eq(K:MyKey(), "yeh neh-forever")
+    -- my own help call echoes back to me: not a call for me to answer
+    y.units.target = { name = "Somebody", guid = "Player-1-0005", level = 30 }
+    H.slash(y, "sos")
+    H.advance(2)
+    assert(feedHas(b, "Yeh Neh needs help"), "Bob got the call")
+    assert(not feedHas(y, "HELP!"), "no help call to myself")
+    for _, w in ipairs(y.raidWarnings) do assert(not w:find("HELP!"), "no banner to myself: " .. w) end
+    -- my live mark is mine, so guildies take it straight away
+    K:Mark("Gankdude", "camps the flight path")
+    H.advance(2)
+    local v = T_(b, "Gankdude").votes["yeh neh-forever"]
+    assert(v, "Bob has Yeh Neh's mark")
+    eq(v.by, "Yeh Neh-Forever")
+    -- and /utu sync doesn't list me as a guildie I heard from
+    local peers = y.db.diag and y.db.diag.sync and y.db.diag.sync.peers or {}
+    eq(peers["yeh neh-forever"], nil, "my own echoes are ignored")
+    assert(peers["bob-forever"], "Bob is listed")
+end)
+
+test("forever: marks, claims and mutes saved under a cut-short two-word name are moved to the whole name", function()
+    H.forever = true
+    local now = math.floor(H.serverTime)
+    local gid = "Gankbusters-Forever"
+    -- saved by 0.7.8 on Yeh Neh's computer: everything under "Yeh", and
+    -- Dangley Neeps (another two-word guildie) recorded as "Dangley"
+    local old = { lists = { [gid] = {
+        targets = {
+            ["gankdude-forever"] = { n = "Gankdude-Forever", w = 2, on = true, votes = {
+                ["yeh-forever"] = { by = "Yeh-Forever", note = "camps", t = now - 100 },
+                ["dangley-forever"] = { by = "Dangley-Forever", note = "", t = now - 90 } } },
+        },
+        kills = { ["yeh-forever|gankdude-forever|" .. (now - 50)] =
+            { target = "Gankdude-Forever", by = "Yeh-Forever", t = now - 50, v = 20, zone = "" } },
+        deaths = { ["dangley-forever|gankdude-forever|" .. (now - 60)] =
+            { victim = "Dangley-Forever", killer = "Gankdude-Forever", t = now - 60, zone = "" } },
+        struck = {},
+    } },
+        charGuild = { ["Yeh-Forever"] = gid },
+        settings = { muted = { ["dangley-forever"] = "Dangley-Forever" } },
+        authored = { ["yeh-forever"] = { [gid] = { since = now - 1000, flags = {},
+            votes = { ["gankdude-forever"] = { n = "Gankdude-Forever", t = now - 100, note = "camps" } },
+            kills = { ["yeh-forever|gankdude-forever|" .. (now - 50)] = { by = "Yeh-Forever", target = "Gankdude-Forever", t = now - 50, v = 20 } } } } },
+    }
+    H.newClient("Dangley Neeps")
+    local y = H.newClient("Yeh Neh", { db = old })
+    H.advance(20)
+    local K = y.KOS
+    local T = T_(y, "Gankdude")
+    assert(T.votes["yeh neh-forever"], "my mark moved to my whole name")
+    eq(T.votes["yeh-forever"], nil)
+    assert(T.votes["dangley neeps-forever"], "Dangley's mark too, once the roster says who he is")
+    eq(T.votes["dangley-forever"], nil)
+    eq(points(y, "Yeh Neh"), 20, "my claim is mine")
+    eq(#K:GanksBy("gankdude-forever"), 1)
+    for _, dd in pairs(K:List().deaths) do eq(dd.victim, "Dangley Neeps-Forever") end
+    assert(K:IsMuted("Dangley Neeps"), "mute follows the whole name")
+    eq(K.S.muted["dangley-forever"], nil)
+    eq(y.db.authored["yeh-forever"], nil, "authorship record moved")
+    local L = K:Ledger()
+    assert(L.votes["gankdude-forever"], "my record still backs my mark")
+    assert(L.kills["yeh neh-forever|gankdude-forever|" .. (now - 50)], "claim re-keyed in my record")
+    eq(y.db.charGuild["Yeh Neh-Forever"], gid)
+    -- an old client still sends Yeh Neh's items as "Yeh": no forgery warning, no duplicate
+    H.fire(y, "CHAT_MSG_ADDON", K.PREFIX, "D\tv\tGankdude-Forever\tYeh-Forever\t" .. (now - 100) .. "\t0\t\t\tcamps", "GUILD", "Dangley Neeps-Forever")
+    H.fire(y, "CHAT_MSG_ADDON", K.PREFIX, "D\tk\tGankdude-Forever\tYeh-Forever\t" .. (now - 50) .. "\t20\t\t\t\t", "GUILD", "Dangley Neeps-Forever")
+    eq(#L.flags, 0, "my own old copies aren't forgeries")
+    eq(T.votes["yeh-forever"], nil, "no duplicate mark")
+    eq(points(y, "Yeh Neh"), 20, "no duplicate claim")
+    -- Dangley on an old version: his live mark names him "Dangley", sent as Dangley Neeps
+    H.fire(y, "CHAT_MSG_ADDON", K.PREFIX, "S\tv\tOtherganker-Forever\tDangley-Forever\t" .. now .. "\t0\t\t\t", "GUILD", "Dangley Neeps-Forever")
+    assert(T_(y, "Otherganker") and T_(y, "Otherganker").votes["dangley neeps-forever"], "accepted as his")
+end)
+
+test("forever: a short name isn't expanded when it's ambiguous or a real guildie", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.newClient("Sam One"); H.newClient("Sam Two")
+    H.newClient("Pip Squeak"); H.newClient("Pip")
+    H.advance(20)
+    local K = a.KOS
+    eq(K:GuildieName("Sam-Forever"), "Sam-Forever", "two guildies called Sam something")
+    eq(K:GuildieName("Pip-Forever"), "Pip-Forever", "Pip is a guildie in his own right")
+    eq(K:GuildieName("Alice-Forever"), "Alice-Forever")
+    eq(K:GuildieId("pip-forever|gankdude-forever|5"), "pip-forever|gankdude-forever|5")
+end)
+
+test("forever: if the game only gives my first name, the guild roster fills in the rest", function()
+    H.forever = true
+    H.newClient("Bob")
+    -- in case UnitName("player") only gives the first word
+    local y = H.newClient("Yeh Neh", { firstNameOnly = true })
+    H.advance(20)
+    eq(y.KOS:MyName(), "Yeh Neh-Forever")
+    y.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    assert(T_(H.clients[1], "Gankdude").votes["yeh neh-forever"], "Bob takes the live mark")
+end)
+
+test("forever: renaming cut-short names keeps strikes, ledgers and other guilds' lists intact", function()
+    H.forever = true
+    local now = math.floor(H.serverTime)
+    local gid = "Gankbusters-Forever"
+    local kt = now - 50
+    local old = { lists = {
+        [gid] = {
+            targets = {
+                ["gankdude-forever"] = { n = "Gankdude-Forever", w = 1, on = true, votes = {
+                    ["sam-forever"] = { by = "Sam-Forever", note = "", t = now - 300 } } },
+                ["otherganker-forever"] = { n = "Otherganker-Forever", w = 1, on = true, votes = {
+                    ["yeh-forever"] = { by = "Yeh-Forever", note = "old", t = now - 400 } } },
+            },
+            -- my claim under my short name, struck by an updated officer under my whole name
+            kills = { ["yeh-forever|gankdude-forever|" .. kt] = { target = "Gankdude-Forever", by = "Yeh-Forever", t = kt, v = 20, zone = "" } },
+            struck = { ["yeh neh-forever|gankdude-forever|" .. kt] = { by = "Bob-Forever", t = now - 10, kt = kt } },
+            deaths = {},
+        },
+        ["Other Guild-Forever"] = {
+            targets = { ["gankdude-forever"] = { n = "Gankdude-Forever", w = 1, on = true, votes = {
+                ["yeh-forever"] = { by = "Yeh-Forever", note = "", t = now - 500 } } } },
+            kills = {}, struck = {}, deaths = {},
+        } },
+        authored = {
+            ["yeh-forever"] = { [gid] = { since = now - 2000, flags = {}, kills = {},
+                votes = { ["otherganker-forever"] = { n = "Otherganker-Forever", t = now - 400, note = "old" } } } },
+            ["yeh neh-forever"] = { [gid] = { since = now - 100, flags = {}, kills = {}, votes = {} } },
+        },
+    }
+    H.newClient("Sam"); H.newClient("Sam One")
+    local y = H.newClient("Yeh Neh", { db = old })
+    H.advance(20)
+    local K = y.KOS
+    assert(T_(y, "Gankdude").votes["sam-forever"], "Sam is a guildie, so his mark stays his")
+    eq(K:List().kills["yeh neh-forever|gankdude-forever|" .. kt], nil, "the struck claim stays struck")
+    eq(points(y, "Yeh Neh"), 0)
+    assert(T_(y, "Otherganker").votes["yeh neh-forever"])
+    local L = K:Ledger()
+    assert(L.votes["otherganker-forever"], "both records merged: the old mark is still backed")
+    eq(L.since, now - 2000, "earliest start kept")
+    H.fire(y, "CHAT_MSG_ADDON", K.PREFIX, "D\tv\tOtherganker-Forever\tYeh-Forever\t" .. (now - 400) .. "\t0\t\t\told", "GUILD", "Sam-Forever")
+    eq(#L.flags, 0, "no forgery flag for my own old mark")
+    assert(y.db.lists["Other Guild-Forever"].targets["gankdude-forever"].votes["yeh-forever"], "another guild's list is left alone")
+end)
+
+test("forever: nothing is renamed before the guild roster loads", function()
+    H.forever = true
+    local now = math.floor(H.serverTime)
+    local old = { lists = { ["Gankbusters-Forever"] = {
+        targets = { ["gankdude-forever"] = { n = "Gankdude-Forever", w = 1, on = true, votes = {
+            ["sam-forever"] = { by = "Sam-Forever", note = "", t = now - 300 } } } },
+        kills = {}, struck = {}, deaths = {} } } }
+    H.newClient("Sam")
+    local s1 = H.newClient("Sam One", { db = old })
+    H.advance(20)
+    assert(T_(s1, "Gankdude").votes["sam-forever"], "Sam's mark wasn't given to Sam One at load")
+    eq(T_(s1, "Gankdude").votes["sam one-forever"], nil)
+end)
+
+test("forever: the rename still happens when the guild loads after the roster", function()
+    H.forever = true
+    local now = math.floor(H.serverTime)
+    local gid = "Gankbusters-Forever"
+    local old = { lists = { [gid] = {
+        targets = { ["gankdude-forever"] = { n = "Gankdude-Forever", w = 1, on = true, votes = {
+            ["yeh-forever"] = { by = "Yeh-Forever", note = "", t = now - 300 } } } },
+        kills = {}, struck = {}, deaths = {} } },
+        charGuild = { ["Yeh-Forever"] = gid } }
+    H.newClient("Bob")
+    local y = H.newClient("Yeh Neh", { db = old, guildInfoLate = true })
+    H.advance(20)
+    y.guildInfoLate = false
+    H.fire(y, "PLAYER_GUILD_UPDATE")
+    H.advance(5)
+    local T = T_(y, "Gankdude")
+    assert(T.votes["yeh neh-forever"], "repaired once the guild loaded")
+    eq(T.votes["yeh-forever"], nil)
+    y.KOS:Mark("Gankdude", "again")
+    eq(T_(y, "Gankdude").w, 1, "re-marking doesn't count twice")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

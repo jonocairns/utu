@@ -19,7 +19,8 @@
 ## Forever quirks
 - No combat log for addons, and some unit fields are secret values.
   - Read units through `KOS:UnitInfo` and gate features on `KOS.caps`.
-- `UnitName` splits two-word names into name and "realm" ("Pi", "Target"). Always normalise names with `KOS:Canonical`.
+- `UnitName` splits two-word names into name and "realm" ("Pi", "Target"), for the player too. Always normalise names with `KOS:Canonical`, and get your own from `KOS:MyName()`.
+- Guildies' old clients may send two-word names cut to the first word: guildie fields go through `KOS:GuildieName` (built from the roster).
 - `GetGuildInfoText` is blocked in combat: use `KOS:GuildInfoText()`.
 - Check `InCombatLockdown()` before touching protected UI.
 

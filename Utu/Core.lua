@@ -571,12 +571,148 @@ end
 
 local myName, myKey
 function KOS:MyName()
-    if not myName then myKey, myName = self:Canonical(UnitName("player")) end
+    if not myName then
+        -- Forever splits two-word names for the player too: UnitName gives
+        -- "Yeh", "Neh". Pass both parts so Canonical puts them back together.
+        local n, r = UnitName("player")
+        if type(n) == "string" and type(r) == "string" and r ~= "" then n = n .. "-" .. r end
+        myKey, myName = self:Canonical(n)
+    end
     return myName
 end
 function KOS:MyKey()
     self:MyName()
     return myKey
+end
+
+------------------------------------------------------------------------
+-- Before 0.7.9 a guildie with a two-word name recorded their own marks,
+-- claims and ganks under their first word only ("Yeh Neh" as "Yeh"), and
+-- their older clients still send them that way. nameFix maps those short
+-- keys to the full name, learned from my own name and the guild roster.
+-- Only guildie fields (who marked, claimed, was ganked) go through it:
+-- enemies are named by the game and were never cut short.
+------------------------------------------------------------------------
+
+KOS.nameFix = {}
+KOS.rosterNames = {} -- roster key -> Name-Realm
+
+-- "Yeh Neh-Realm" -> "yeh-realm"; nil for one-word names.
+local function shortKey(full)
+    local n, r = strsplit("-", full, 2)
+    local first = n and n:match("^(%S+) ")
+    return first and KOS:Canonical(first .. ((r and r ~= "") and ("-" .. r) or ""))
+end
+KOS.ShortKey = shortKey
+
+-- Rebuild nameFix from the current guild roster, so every guildie's
+-- client agrees on it. A short name that's a real guildie, or that two
+-- guildies share, isn't expanded. Kept as it was while the roster is
+-- empty (not loaded yet). Returns true if an entry was added.
+function KOS:BuildNameFix()
+    if not next(self.roster) then return false end
+    -- if the game only gave my first name, the roster has the rest
+    local me = self:MyKey()
+    if me and next(self.roster) and not self.roster[me] then
+        local match, n = nil, 0
+        for _, full in pairs(self.rosterNames) do
+            if shortKey(full) == me then match, n = full, n + 1 end
+        end
+        if n == 1 then
+            myKey, myName = self:Canonical(match)
+            self:InvalidateListKey()
+        end
+    end
+    local fixes, owners, gained = {}, {}, false
+    local function add(full)
+        local short = full and shortKey(full)
+        if not short then return end
+        owners[short] = owners[short] or {}
+        owners[short][self:Canonical(full)] = full
+    end
+    add(self:MyName())
+    for _, full in pairs(self.rosterNames) do add(full) end
+    for short, fulls in pairs(owners) do
+        local only, n = nil, 0
+        for _, full in pairs(fulls) do only, n = full, n + 1 end
+        if n == 1 and not self.roster[short] then
+            if self.nameFix[short] ~= only then gained = true end
+            fixes[short] = only
+        end
+    end
+    self.nameFix = fixes
+    return gained
+end
+
+-- A guildie's Name-Realm with a cut-short two-word name put right.
+function KOS:GuildieName(full)
+    local key = type(full) == "string" and self:Canonical(full)
+    return (key and self.nameFix[key]) or full
+end
+
+-- Same for the hunter in a claim id ("hunterKey|targetKey|t").
+function KOS:GuildieId(id)
+    if type(id) ~= "string" then return id end
+    local by, rest = id:match("^([^|]*)|(.*)$")
+    local fixed = by and self.nameFix[by]
+    return fixed and (self:Canonical(fixed) .. "|" .. rest) or id
+end
+
+-- Two authorship records for one list (my cut-short and whole names):
+-- keep the newest revision of each mark, the lowest value of each claim,
+-- every flag, and the earlier start.
+function KOS.MergeLedgers(a, b)
+    if not a then return b end
+    if not b then return a end
+    a.since = math.min(tonumber(a.since) or math.huge, tonumber(b.since) or math.huge)
+    a.votes, a.kills, a.flags = a.votes or {}, a.kills or {}, a.flags or {}
+    for key, e in pairs(b.votes or {}) do
+        local cur = a.votes[key]
+        if not cur or (tonumber(e.t) or 0) > (tonumber(cur.t) or 0) then a.votes[key] = e end
+    end
+    for id, e in pairs(b.kills or {}) do
+        local cur = a.kills[id]
+        if not cur or (tonumber(e.v) or 0) < (tonumber(cur.v) or 0) then a.kills[id] = e end
+    end
+    for _, f in ipairs(b.flags or {}) do a.flags[#a.flags + 1] = f end
+    table.sort(a.flags, function(x, y) return (tonumber(x.at or x.t) or 0) < (tonumber(y.at or y.t) or 0) end)
+    while #a.flags > KOS.FLAGS_KEPT do table.remove(a.flags, 1) end
+    return a
+end
+
+-- Move what's saved under my cut-short name (mutes, guild, authorship
+-- record) to my whole name, and put muted guildies' names right.
+function KOS:FixNameRecords()
+    local db, me, myFull = self.db, self:MyKey(), self:MyName()
+    if not db or not me then return end
+    local muted, moves = self.S.muted, {}
+    for key, full in pairs(muted) do
+        local fixed = self:GuildieName(full)
+        if fixed ~= full then moves[key] = fixed end
+    end
+    for key, fixed in pairs(moves) do
+        muted[key] = nil
+        muted[self:Canonical(fixed)] = fixed
+    end
+    for short, full in pairs(self.nameFix) do
+        if self:Canonical(full) == me then
+            if db.authored and db.authored[short] then
+                db.authored[me] = db.authored[me] or {}
+                for lk, L in pairs(db.authored[short]) do
+                    db.authored[me][lk] = self.MergeLedgers(db.authored[me][lk], L)
+                end
+                db.authored[short] = nil
+            end
+            local old = {}
+            for k in pairs(db.charGuild) do
+                if self:Canonical(k) == short then old[#old + 1] = k end
+            end
+            for _, k in ipairs(old) do
+                if db.charGuild[myFull] == nil then db.charGuild[myFull] = db.charGuild[k] end
+                db.charGuild[k] = nil
+            end
+        end
+    end
 end
 
 ------------------------------------------------------------------------
@@ -703,6 +839,7 @@ function KOS:RepairNames(list)
         local _, full = self:Canonical(name)
         return full or name
     end
+    local function guildie(name) return fix(self:GuildieName(name)) end
     local function newer(a, b) return not a or (b and (b.t or 0) > (a.t or 0)) end
 
     local targets = {}
@@ -711,11 +848,12 @@ function KOS:RepairNames(list)
         T.n = fix(T.n)
         local votes = {}
         for vk, v in pairs(T.votes or {}) do
+            v.by = guildie(v.by)
             local rk = self:Canonical(v.by) or vk
-            v.by = fix(v.by)
             if newer(votes[rk], v) then votes[rk] = v end
         end
         T.votes = votes
+        if T.cleared then T.cleared.by = guildie(T.cleared.by) end
         local cur = targets[nkey]
         if not cur then
             targets[nkey] = T
@@ -733,7 +871,7 @@ function KOS:RepairNames(list)
 
     local deaths = {}
     for _, d in pairs(list.deaths) do
-        d.victim, d.killer = fix(d.victim), fix(d.killer)
+        d.victim, d.killer = guildie(d.victim), fix(d.killer)
         local nid = self.DeathId(d)
         if not deaths[nid] then deaths[nid] = d end
     end
@@ -741,7 +879,7 @@ function KOS:RepairNames(list)
 
     local kills = {}
     for _, k in pairs(list.kills) do
-        k.target, k.by, k.rev, k.res = fix(k.target), fix(k.by), fix(k.rev), fix(k.res)
+        k.target, k.by, k.rev, k.res = fix(k.target), guildie(k.by), guildie(k.rev), guildie(k.res)
         local nid = self.KillId(k)
         local cur = kills[nid]
         if not cur or (tonumber(k.v) or 0) < (tonumber(cur.v) or 0) then kills[nid] = k end
@@ -751,10 +889,14 @@ function KOS:RepairNames(list)
     local struck = {}
     for id, x in pairs(list.struck) do
         local by, target, t = strsplit("|", id)
-        local nid = (t and (self:Canonical(by) or by) .. "|" .. (self:Canonical(target) or target) .. "|" .. t) or id
+        local nid = (t and (self:Canonical(self:GuildieName(by)) or by) .. "|" .. (self:Canonical(target) or target) .. "|" .. t) or id
+        x.by = guildie(x.by)
         struck[nid] = struck[nid] or x
     end
     list.struck = struck
+    -- re-keying can line a claim up with a strike made under the other name
+    for id in pairs(struck) do kills[id] = nil end
+    if list.season then list.season.by = guildie(list.season.by) end
 end
 
 -- Which list is in use: one per guild, or a personal list when unguilded.
@@ -1030,6 +1172,7 @@ function KOS:TidyLedgers()
             end
             for _, e in pairs(L.kills or {}) do
                 if type(e.t) == "number" and e.t >= horizon then
+                    e.by = self:GuildieName(e.by)
                     local id = self.KillId(e)
                     local cur = kills[id]
                     if not cur or e.v < cur.v then kills[id] = e end
@@ -1461,12 +1604,42 @@ KOS.roster = {}
 
 function KOS:RefreshRoster()
     wipe(self.roster)
+    wipe(self.rosterNames)
     if not IsInGuild() then return end
     for i = 1, GetNumGuildMembers() do
         local name, _, rankIndex = GetGuildRosterInfo(i)
-        local key = self:Canonical(name)
-        if key then self.roster[key] = rankIndex end
+        local key, full = self:Canonical(name)
+        if key then self.roster[key], self.rosterNames[key] = rankIndex, full end
     end
+    if self.db then self:ApplyNameFix(self:BuildNameFix()) end
+end
+
+-- Repair the current guild list with nameFix, once per list for each
+-- version of it (the guild can load after the roster, so this is retried
+-- on roster and guild updates), then my own records.
+local nameFixDone = {} -- listKey -> nameFix signature it was repaired with
+function KOS:ApplyNameFix(gained)
+    if not next(self.nameFix) then return end
+    local repaired = false
+    if self:IsGuildList() then
+        local pairsList = {}
+        for short, full in pairs(self.nameFix) do pairsList[#pairsList + 1] = short .. "=" .. full end
+        table.sort(pairsList)
+        local lk, sig = self:ListKey(), table.concat(pairsList, ";")
+        if nameFixDone[lk] ~= sig then
+            nameFixDone[lk] = sig
+            local list = self:List()
+            self:RepairNames(list)
+            self:InvalidateKills()
+            for _, T in pairs(list.targets) do self:Recalc(T) end
+            repaired = true
+        end
+    end
+    if not (gained or repaired) then return end
+    self:FixNameRecords()
+    self:TidyLedgers()
+    self:InvalidateKills()
+    self:Changed()
 end
 
 function KOS:RequestRoster()
@@ -2774,6 +2947,7 @@ end)
 
 KOS:On("PLAYER_GUILD_UPDATE", function()
     KOS:InvalidateListKey()
+    KOS:ApplyNameFix()
     KOS:RequestRoster()
     KOS:Changed()
 end)

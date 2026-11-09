@@ -120,11 +120,16 @@ end
 Sync.stamp = stamp
 
 -- Returns kind, item (normalised) or nil.
+-- Guildie names (who marked, claimed, was ganked) from older clients can be
+-- a two-word name cut to its first word: put them right (see KOS.nameFix).
+local function guildie(full) return full and KOS:GuildieName(full) end
+
 local function decodeItem(s)
     local kind, f1, f2, f3, f4, f5, f6, f7 = strsplit(SEP, s)
     if kind == "v" then
         local key, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
+        by = guildie(by)
         local t = stamp(f3)
         if not key or not by or not t then return nil end
         return "vote", {
@@ -136,12 +141,14 @@ local function decodeItem(s)
     elseif kind == "c" then
         local key, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
+        by = guildie(by)
         local t = stamp(f3)
         if not key or not by or not t then return nil end
         return "clear", { key = key, target = target, by = by, t = t }
     elseif kind == "k" then
         local _, target = KOS:Canonical(f1)
         local _, by = KOS:Canonical(f2)
+        by = guildie(by)
         local t, v = stamp(f3), tonumber(f4)
         if not target or not by or not t or not v then return nil end
         v = math.max(0, math.min(KOS.MAX_CLAIM, math.floor(v)))
@@ -150,7 +157,7 @@ local function decodeItem(s)
         local mode = select(9, strsplit(SEP, s))
         return "kill", { target = target, by = by, t = t, v = v, zone = KOS.CleanText(f5, 60),
             guild = g ~= "" and g or nil,
-            rev = (mode == "r") and who or nil, res = (mode == "s") and who or nil,
+            rev = (mode == "r") and guildie(who) or nil, res = (mode == "s") and guildie(who) or nil,
             assist = (mode == "a") or nil }
     elseif kind == "g" then
         local key, target = KOS:Canonical(f1)
@@ -160,18 +167,21 @@ local function decodeItem(s)
         return "guild", { key = key, target = target, guild = g, t = t }
     elseif kind == "d" then
         local _, victim = KOS:Canonical(f1)
+        victim = guildie(victim)
         local _, killer = KOS:Canonical(f2)
         local t = stamp(f3)
         if not victim or not killer or not t then return nil end
         return "death", { victim = victim, killer = killer, t = t, by = victim, zone = KOS.CleanText(f4, 60) }
     elseif kind == "x" then
         local _, by = KOS:Canonical(f2)
+        by = guildie(by)
         local t = stamp(f3)
         local kt = f1 and stamp(f1:match("|(%d+)$"))
         if not by or not t or not kt then return nil end
-        return "strike", { id = f1, by = by, t = t, kt = kt }
+        return "strike", { id = KOS:GuildieId(f1), by = by, t = t, kt = kt }
     elseif kind == "s" then
         local _, by = KOS:Canonical(f1)
+        by = guildie(by)
         local t = stamp(f2)
         if not by or not t then return nil end
         return "season", { by = by, t = t }

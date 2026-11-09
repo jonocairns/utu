@@ -206,7 +206,7 @@ end
 
 function H.newClient(name, opts)
     opts = opts or {}
-    local c = { name = name, rank = opts.rank or 5, inGuild = opts.inGuild ~= false, online = true, chat = {}, raidWarnings = {} }
+    local c = { guildInfoLate = opts.guildInfoLate, name = name, rank = opts.rank or 5, inGuild = opts.inGuild ~= false, online = true, chat = {}, raidWarnings = {} }
     c.units = {} -- unit token -> { name=, realm=, guid=, class=, player=true }
     c.db = opts.db
     c.version = opts.version
@@ -227,7 +227,7 @@ function H.newClient(name, opts)
     env.IsInGuild = function() return c.inGuild end
     env.GetGuildInfo = function(unit)
         if unit == "player" then
-            if c.inGuild then return H.guild.name, "Rank" .. c.rank, c.rank, nil end
+            if c.inGuild and not c.guildInfoLate then return H.guild.name, "Rank" .. c.rank, c.rank, nil end
             return nil
         end
         local u = c.units[unit]
@@ -258,7 +258,15 @@ function H.newClient(name, opts)
     env.C_GuildInfo = { GuildRoster = function() end }
 
     env.UnitName = function(unit)
-        if unit == "player" then return c.name end
+        if unit == "player" then
+            -- Forever splits two-word names, the player's own included
+            if H.forever and c.name:find(" ", 1, true) then
+                local first, rest = c.name:match("^(%S+) (.+)$")
+                if opts.firstNameOnly then return first end
+                return first, rest
+            end
+            return c.name
+        end
         local u = c.units[unit]
         if u then return u.name, u.realm end
     end
@@ -307,8 +315,9 @@ function H.newClient(name, opts)
             sendCount = sendCount + 1
             if H.throttleEvery and sendCount % H.throttleEvery == 0 then return 3 end -- AddonMessageThrottle
             H.sent[#H.sent + 1] = { from = c.name, msg = msg }
+            -- the game echoes guild addon messages back to the sender too
             for _, other in ipairs(H.clients) do
-                if other ~= c and other.online and other.inGuild then
+                if other.online and other.inGuild then
                     deliveries[#deliveries + 1] = function()
                         H.fire(other, "CHAT_MSG_ADDON", prefix, msg, "GUILD", c.name .. "-Forever")
                     end
