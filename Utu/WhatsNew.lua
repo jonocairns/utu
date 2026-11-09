@@ -1,6 +1,9 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.8.0", {
+        "|cffffd100Signed marks and claims:|r your marks, removals and claims now carry a signature only your computer can make. If a game crash loses them from your saved data, they come back from guildies without a false \"Possible forgery\" warning, and a forger still can't fake one.",
+    } },
     { "0.7.9", {
         "|cffffd100Two-word names fixed:|r Utu knew players with a two-word name (like \"Yeh Neh\") by their first word only. Their own help calls popped up for them, and their marks, removals, claims and pardons only reached guildies at the next full sync. Existing marks, claims and mutes move to the whole name when you log in.",
         "|cffffd100Everyone should update:|r older versions count an updated guildie's marks and claims twice until they do.",

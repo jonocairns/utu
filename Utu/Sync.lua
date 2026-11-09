@@ -83,15 +83,20 @@ local function join(...) return table.concat({ ... }, SEP) end
 
 local function encodeItem(kind, a, b)
     if kind == "vote" then -- a = target, b = vote
-        return join("v", a.n, b.by, tostring(b.t), b.del and "1" or "0", a.guid or "", a.class or "", b.note or "")
+        local s = join("v", a.n, b.by, tostring(b.t), b.del and "1" or "0", a.guid or "", a.class or "", b.note or "")
+        -- the author's tag goes last: older clients ignore the extra field
+        local sig = KOS.CleanSig(b.sig)
+        return sig and (s .. SEP .. sig) or s
     elseif kind == "clear" then
         return join("c", a.n, b.by, tostring(b.t))
     elseif kind == "guild" then -- a = target
         return join("g", a.n, a.guild or "", tostring(a.guildT))
     elseif kind == "kill" then -- a = kill
         local mode = (a.rev and "r") or (a.res and "s") or (a.assist and "a") or ""
-        return join("k", a.target, a.by, tostring(a.t), tostring(a.v), a.zone or "", a.guild or "",
+        local s = join("k", a.target, a.by, tostring(a.t), tostring(a.v), a.zone or "", a.guild or "",
             a.rev or a.res or "", mode)
+        local sig = KOS.CleanSig(a.sig)
+        return sig and (s .. SEP .. sig) or s
     elseif kind == "death" then -- a = death
         return join("d", a.victim, a.killer, tostring(a.t), a.zone or "")
     elseif kind == "strike" then -- a = id, b = strike
@@ -137,6 +142,7 @@ local function decodeItem(s)
             guid = (f5 and f5 ~= "") and f5 or nil,
             class = (f6 and f6:match("^%u+$")) or nil,
             note = (f4 == "1") and "" or KOS.CleanText(f7),
+            sig = KOS.CleanSig((select(9, strsplit(SEP, s)))),
         }
     elseif kind == "c" then
         local key, target = KOS:Canonical(f1)
@@ -154,11 +160,11 @@ local function decodeItem(s)
         v = math.max(0, math.min(KOS.MAX_CLAIM, math.floor(v)))
         local g = KOS.CleanText(f6, 64)
         local _, who = KOS:Canonical(f7)
-        local mode = select(9, strsplit(SEP, s))
+        local mode, sig = select(9, strsplit(SEP, s))
         return "kill", { target = target, by = by, t = t, v = v, zone = KOS.CleanText(f5, 60),
             guild = g ~= "" and g or nil,
             rev = (mode == "r") and guildie(who) or nil, res = (mode == "s") and guildie(who) or nil,
-            assist = (mode == "a") or nil }
+            assist = (mode == "a") or nil, sig = KOS.CleanSig(sig) }
     elseif kind == "g" then
         local key, target = KOS:Canonical(f1)
         local g = KOS.CleanText(f2, 64)
@@ -190,6 +196,10 @@ end
 
 local function itemMsg(tag, kind, a, b)
     local msg = tag .. SEP .. encodeItem(kind, a, b)
+    if #msg > MAX_MSG and kind == "vote" and b.sig then
+        -- a signed note can't be trimmed: drop the tag first
+        msg = tag .. SEP .. encodeItem(kind, a, { by = b.by, t = b.t, del = b.del, note = b.note })
+    end
     if #msg > MAX_MSG and kind == "vote" then
         local note = b.note or ""
         local trimmed = { by = b.by, t = b.t, del = b.del,
@@ -198,8 +208,12 @@ local function itemMsg(tag, kind, a, b)
     elseif #msg > MAX_MSG and kind == "kill" then
         local copy = {}
         for k, v in pairs(a) do copy[k] = v end
-        copy.zone = KOS.Utf8Truncate(copy.zone or "", math.max(0, #(copy.zone or "") - (#msg - MAX_MSG)))
+        copy.sig = nil -- a sendable claim matters more than its tag
         msg = tag .. SEP .. encodeItem(kind, copy)
+        if #msg > MAX_MSG then
+            copy.zone = KOS.Utf8Truncate(copy.zone or "", math.max(0, #(copy.zone or "") - (#msg - MAX_MSG)))
+            msg = tag .. SEP .. encodeItem(kind, copy)
+        end
     end
     if #msg > MAX_MSG then return nil end -- still too big (shouldn't happen with valid names): skip it
     return msg

@@ -1989,5 +1989,199 @@ test("forever: the rename still happens when the guild loads after the roster", 
     eq(T_(y, "Gankdude").w, 1, "re-marking doesn't count twice")
 end)
 
+test("signing: SHA-256 and HMAC match published test vectors, with or without the game's bit library", function()
+    local function bits(a, b, f)
+        a, b = a % 4294967296, b % 4294967296
+        local r, p = 0, 1
+        for _ = 1, 32 do
+            local x, y = a % 2, b % 2
+            if f(x, y) then r = r + p end
+            a, b, p = (a - x) / 2, (b - y) / 2, p * 2
+        end
+        return r
+    end
+    -- like LuaBitOp: any number in, signed 32-bit out
+    local signed = function(r) return r >= 2147483648 and r - 4294967296 or r end
+    local bitop = {
+        band = function(a, b) return signed(bits(a, b, function(x, y) return x == 1 and y == 1 end)) end,
+        bxor = function(a, b) return signed(bits(a, b, function(x, y) return x ~= y end)) end,
+    }
+    -- a build that saturates big numbers: fails the self-test, so it's not used
+    local clamp = function(x) return math.min(x % 4294967296, 2147483647) end
+    local broken = {
+        band = function(a, b) return bitop.band(clamp(a), clamp(b)) end,
+        bxor = function(a, b) return bitop.bxor(clamp(a), clamp(b)) end,
+    }
+    local clients = { H.newClient("Alice"), H.newClient("Bob", { bit = bitop }), H.newClient("Carol", { bit = broken }) }
+    for _, c in ipairs(clients) do
+        local K = c.KOS
+        eq(K.SHA256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", c.name)
+        eq(K.SHA256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", c.name)
+        eq(K.SHA256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", c.name)
+        eq(K.HMAC(string.rep("\11", 20), "Hi There"), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7", c.name)
+        eq(K.HMAC("Jefe", "what do ya want for nothing?"), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", c.name)
+        eq(K.HMAC(string.rep("\170", 131), "Test Using Larger Than Block-Size Key - Hash Key First"),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54", c.name)
+    end
+    local keys = clients[1].KOS:SigKeys()
+    eq(#keys[1], 32, "a 32-byte key")
+    clients[2].KOS:SigKeys()
+    assert(clients[1].db.signing.keys[1] ~= clients[2].db.signing.keys[1], "each computer has its own key")
+    -- the key is saved and reused, not remade
+    local again = H.relogin(clients[1])
+    eq(again.KOS:SigKeys()[1], keys[1])
+end)
+
+local function claim(c, target, v)
+    local K = c.KOS
+    local k = { target = target .. "-Forever", by = K:MyName(), t = K:Now(), v = v, zone = "" }
+    assert(K:RecordClaim(k, function() return "claimed" end), "claim recorded")
+    return K.KillId(k)
+end
+
+test("signing: marks and claims lost in a crash come back from guildies without a forgery warning", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local gid = "Gankbusters-Forever"
+    a.KOS:Ledger().since = math.floor(H.serverTime) - 1000
+    a.KOS:Mark("Gankdude", "camps the flight path")
+    H.advance(1)
+    a.KOS:Mark("Otherganker", "")
+    H.advance(1)
+    a.KOS:Unmark("Otherganker")
+    local id = claim(a, "Gankdude", 20)
+    H.advance(5)
+    local bv = T_(b, "Gankdude").votes["alice-forever"]
+    assert(bv and bv.sig, "Bob holds Alice's mark with her tag")
+    assert(b.KOS:List().kills[id].sig, "and her claim's")
+    -- the game crashes: none of that reached Alice's saved data
+    local db = a.db
+    local list = db.lists[gid]
+    list.targets["gankdude-forever"].votes["alice-forever"] = nil
+    list.targets["otherganker-forever"].votes["alice-forever"] = nil
+    list.kills[id] = nil
+    local L = db.authored["alice-forever"][gid]
+    L.votes, L.kills = {}, {}
+    local a2 = H.relogin(a)
+    H.advance(60)
+    eq(#a2.KOS:Ledger().flags, 0, "my own signed items aren't forgeries")
+    assert(a2.KOS:MyVote(T_(a2, "Gankdude")), "my mark is back")
+    assert(a2.KOS:Ledger().votes["gankdude-forever"], "and my record knows it again")
+    assert(a2.KOS:Ledger().votes["otherganker-forever"].del, "the removal too")
+    assert(a2.KOS:Ledger().kills[id], "and the claim")
+    eq(points(a2, "Alice"), 20)
+end)
+
+test("signing: copying my tag onto changed or made-up items doesn't get past the check", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local K = a.KOS
+    K:Ledger().since = math.floor(H.serverTime) - 1000
+    K:Mark("Gankdude", "camps the flight path")
+    local id = claim(a, "Gankdude", 20)
+    H.advance(5)
+    local T = T_(b, "Gankdude")
+    local v = T.votes["alice-forever"]
+    local enc = b.Sync.encodeItem
+    local function dump(msg) H.fire(a, "CHAT_MSG_ADDON", K.PREFIX, "D\t" .. msg, "GUILD", "Carol-Forever") end
+    local flags = function() return #K:Ledger().flags end
+    -- a removal, a later copy, and a new note, each carrying the real tag
+    dump(enc("vote", T, { by = v.by, t = v.t + 5, del = true, note = "", sig = v.sig }))
+    eq(flags(), 1, "forged removal")
+    dump(enc("vote", T, { by = v.by, t = v.t, note = "is a nice guy", sig = v.sig }))
+    eq(flags(), 2, "changed note")
+    local T2 = { n = "Victimtwo-Forever" }
+    dump(enc("vote", T2, { by = v.by, t = v.t, note = v.note, sig = v.sig }))
+    eq(flags(), 3, "tag moved to another player")
+    dump(enc("vote", T2, { by = v.by, t = v.t + 1, note = "", sig = "1" .. string.rep("0", 16) }))
+    eq(flags(), 4, "made-up tag")
+    local k = b.KOS:List().kills[id]
+    dump(enc("kill", { target = k.target, by = k.by, t = k.t, v = 1, zone = "", sig = k.sig }))
+    eq(flags(), 5, "lowered claim")
+    dump(enc("kill", { target = "Victimtwo-Forever", by = k.by, t = k.t, v = 20, zone = "", sig = k.sig }))
+    eq(flags(), 6, "claim on someone else")
+    -- the genuine items, relayed again: still fine
+    dump(enc("vote", T, v))
+    dump(enc("kill", k))
+    eq(flags(), 6)
+end)
+
+test("signing: tags travel through relays, older clients ignore them, and long messages still fit", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:Mark("Gankdude", "camps the flight path")
+    H.advance(5)
+    local c = H.newClient("Carol")
+    H.advance(60)
+    local cv = T_(c, "Gankdude").votes["alice-forever"]
+    eq(cv.sig, T_(a, "Gankdude").votes["alice-forever"].sig, "Carol got the tag from a relay")
+    assert(allSame(), "tags don't change the fingerprint")
+    -- an older client splits a vote into kind + 7 fields: the tag is an extra one after the note
+    local msg = b.Sync.encodeItem("vote", T_(b, "Gankdude"), T_(b, "Gankdude").votes["alice-forever"])
+    local fields = { strsplit and strsplit("\t", msg) or nil }
+    if #fields == 0 then
+        for f in (msg .. "\t"):gmatch("([^\t]*)\t") do fields[#fields + 1] = f end
+    end
+    eq(fields[8], "camps the flight path", "note where older clients expect it")
+    eq(#fields, 9)
+    -- unsigned items (from older clients) still decode
+    local kind, it = b.Sync.decodeItem("v\tGankdude-Forever\tDave-Forever\t" .. math.floor(H.serverTime) .. "\t0\t\t\thi")
+    eq(kind, "vote"); eq(it.sig, nil); eq(it.note, "hi")
+    -- the longest names and note: the tag is dropped rather than the note trimmed
+    local long = "Abcdefghijklmnopqr Abcdefghijklmnopq-" .. string.rep("R", 40)
+    local T = { n = long, guid = "Player-1234-0ABCDEF1", class = "DEATHKNIGHT" }
+    local vote = { by = long, t = math.floor(H.serverTime), note = string.rep("n", 100), sig = "1" .. string.rep("a", 16) }
+    local m = b.Sync.itemMsg("D", "vote", T, vote)
+    assert(m and #m <= 255, "fits")
+    local _, back = b.Sync.decodeItem(m:sub(3))
+    eq(back.sig, nil, "tag dropped")
+    -- short enough: the tag stays
+    local m2 = b.Sync.itemMsg("D", "vote", { n = "Gankdude-Forever" }, { by = "Alice-Forever", t = 5, note = "hi", sig = vote.sig })
+    eq(select(2, b.Sync.decodeItem(m2:sub(3))).sig, vote.sig)
+end)
+
+test("signing: tags are tied to the guild list, survive note cleaning, and follow claim changes", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local K = a.KOS
+    -- a note that ends in a space once cut to 100 bytes still verifies after a round trip
+    K:Mark("Gankdude", string.rep("x", 99) .. " y")
+    H.advance(5)
+    local T = T_(b, "Gankdude")
+    local _, it = b.Sync.decodeItem(b.Sync.encodeItem("vote", T, T.votes["alice-forever"]))
+    assert(K:VerifyVote(it), "cleaned note verifies")
+    -- the same tag doesn't verify for another guild's list
+    H.guild.name = "Other Guild"
+    H.fire(a, "PLAYER_GUILD_UPDATE")
+    assert(not K:VerifyVote(it), "not valid in another guild's list")
+    H.guild.name = "Gankbusters"
+    H.fire(a, "PLAYER_GUILD_UPDATE")
+    assert(K:VerifyVote(it))
+    -- two of my claims share an id: the lower one is kept, with its own tag
+    local now = K:Now()
+    local k1 = { target = "Otherganker-Forever", by = K:MyName(), t = now, v = 20, zone = "" }
+    local k2 = { target = "Otherganker-Forever", by = K:MyName(), t = now, v = 10, zone = "" }
+    K:RecordClaim(k1, function() return "" end)
+    K:RecordClaim(k2, function() return "" end)
+    local stored = K:List().kills[K.KillId(k1)]
+    eq(stored.v, 10)
+    assert(K:VerifyKill(stored), "stored tag matches the stored value")
+    -- an unsigned copy (relayed by an older client) picks up the tag when the signed one arrives
+    local c = H.newClient("Carol")
+    H.advance(60)
+    local cv = T_(c, "Gankdude").votes["alice-forever"]
+    local sig = cv.sig
+    cv.sig = nil
+    c.KOS:MergeVote("gankdude-forever", "Gankdude-Forever", { by = cv.by, t = cv.t, note = cv.note, sig = sig })
+    eq(cv.sig, sig, "tag filled in")
+    -- the longest claim still sends: its tag is dropped first
+    local long = "Abcdefghijklmnopqr Abcdefghijklmnopq-CAMWOWAU1Realm2PvP"
+    local kill = { target = long, by = long, t = now, v = 100, zone = "Stranglethorn Vale", guild = string.rep("G", 64),
+        rev = long, sig = "1" .. string.rep("b", 16) }
+    local m = b.Sync.itemMsg("D", "kill", kill)
+    assert(m and #m <= 255, "the claim still fits")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -36,5 +36,5 @@ read_globals = {
     "UnitIsEnemy", "UnitIsGroupAssistant", "UnitIsGroupLeader", "UnitIsInMyGuild", "UnitIsPlayer",
     "UnitIsUnit", "UnitLevel", "UnitName", "UnitPosition", "WOW_PROJECT_CAMELOT",
     "WOW_PROJECT_CLASSIC", "WOW_PROJECT_ID", "WOW_PROJECT_MAINLINE", "YES", "bit", "debugstack",
-    "date", "geterrorhandler", "issecretvalue", "strsplit", "strtrim", "time", "tinsert", "wipe",
+    "date", "debugprofilestop", "geterrorhandler", "issecretvalue", "strsplit", "strtrim", "time", "tinsert", "wipe",
 }

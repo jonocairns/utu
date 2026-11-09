@@ -209,8 +209,9 @@ end
 function KOS.CleanText(s, max)
     s = tostring(s or "")
     s = s:gsub("|", ""):gsub("[\t\r\n]", " ")
-    s = strtrim(s)
-    return KOS.Utf8Truncate(s, max or KOS.NOTE_MAX)
+    -- trim again after truncating, so cleaning a cleaned text changes
+    -- nothing (signed notes must survive a round trip)
+    return strtrim(KOS.Utf8Truncate(strtrim(s), max or KOS.NOTE_MAX))
 end
 
 -- Server time, strictly later than every timestamp passed in.
@@ -795,6 +796,9 @@ function KOS:InitDB()
         end
     end
     self:TidyLedgers()
+    -- make the signing key now, so it's saved even if nothing is signed
+    -- this session (a crash in the session that made it would lose it)
+    if self.SigKeys then self:SigKeys() end
 end
 
 -- Drop saved entries too damaged to use (hand-edited or corrupted saved
@@ -813,13 +817,13 @@ function KOS:DropDamaged(list)
         else
             if type(T.votes) ~= "table" then T.votes = {} end
             for vk, v in pairs(T.votes) do
-                if not ok(v, "by") then T.votes[vk] = nil end
+                if not ok(v, "by") then T.votes[vk] = nil else v.sig = KOS.CleanSig(v.sig) end
             end
             if T.cleared ~= nil and not ok(T.cleared, "by") then T.cleared = nil end
         end
     end
     for id, k in pairs(list.kills) do
-        if not ok(k, "by", "target") then list.kills[id] = nil end
+        if not ok(k, "by", "target") then list.kills[id] = nil else k.sig = KOS.CleanSig(k.sig) end
     end
     for id, d in pairs(list.deaths) do
         if not ok(d, "victim", "killer") then list.deaths[id] = nil end
@@ -1055,8 +1059,12 @@ function KOS:MergeVote(key, full, v, guid, class)
     local rkey = self:Canonical(v.by)
     if not rkey then return false end
     local cur = T.votes[rkey]
+    if cur and cur.t == v.t and not cur.sig and (cur.del and true or false) == (v.del and true or false)
+        and (cur.note or "") == (v.note or "") then
+        cur.sig = KOS.CleanSig(v.sig) -- same revision, relayed with its author's tag
+    end
     if cur and cur.t >= v.t then return false end
-    T.votes[rkey] = { by = v.by, note = v.note or "", t = v.t, del = v.del or nil }
+    T.votes[rkey] = { by = v.by, note = v.note or "", t = v.t, del = v.del or nil, sig = KOS.CleanSig(v.sig) }
     self:Recalc(T)
     self:InvalidateIndex()
     return true
@@ -1091,14 +1099,16 @@ function KOS:MergeKill(k)
     local cur = list.kills[id]
     if cur then
         -- same claim with a different value (forged or buggy): everyone keeps the lower one
-        if v < cur.v then cur.v = v; self:InvalidateKills(); return true end
+        if v < cur.v then cur.v, cur.sig = v, KOS.CleanSig(k.sig); self:InvalidateKills(); return true end
+        -- the same claim relayed with its author's tag (an older client dropped it)
+        if v == cur.v and not cur.sig then cur.sig = KOS.CleanSig(k.sig) end
         return false
     end
     list.kills[id] = { target = k.target, by = k.by, t = k.t, v = v, zone = k.zone,
         guild = (k.guild and k.guild ~= "") and k.guild or nil,
         rev = (k.rev and k.rev ~= "") and k.rev or nil,
         res = (k.res and k.res ~= "") and k.res or nil,
-        assist = k.assist or nil }
+        assist = k.assist or nil, sig = KOS.CleanSig(k.sig) }
     self:InvalidateKills()
     self:InvalidateGuildStats()
     return true
@@ -1232,6 +1242,12 @@ function KOS:AuditVote(it, via)
         bad = del ~= (e.del and true or false) or not (a == b:sub(1, #a) or b == a:sub(1, #b))
     end
     if not bad then return end
+    -- signed by this client: genuinely mine (e.g. made before a crash lost
+    -- the record), so learn it instead of flagging it
+    if self:VerifyVote(it) then
+        if not e or it.t >= e.t then L.votes[it.key] = { n = it.target, t = it.t, del = it.del or nil, note = it.note or "" } end
+        return
+    end
     local name, relay = quoteName(it.target), self:Display(via)
     local text
     if del and e and not e.del then
@@ -1252,6 +1268,11 @@ function KOS:AuditKill(it, via)
     local id = self.KillId(it)
     local e = L.kills[id]
     local relay = self:Display(via)
+    if (not e or it.v < e.v) and self:VerifyKill(it) then
+        if not e and it.t < L.since then return end
+        L.kills[id] = { by = it.by, target = it.target, t = it.t, v = it.v }
+        return
+    end
     if not e then
         if it.t < L.since then return end
         self:FlagForgery(L, "k|" .. id .. "|" .. it.v, { kind = "claim", target = it.target, t = it.t, v = it.v, via = via },
@@ -1757,6 +1778,7 @@ function KOS:Mark(name, note, guid, class)
         note = self.CleanText(note),
         t = self:Now(old and old.t, T.cleared and T.cleared.t),
     }
+    v.sig = self:SignVote(key, v)
     T.votes[self:MyKey()] = v
     self:LedgerVote(key, full, v)
     if guid and not T.guid then T.guid = guid end
@@ -1779,6 +1801,7 @@ function KOS:Unmark(name)
     local old = T and T.votes[self:MyKey()]
     if not old or old.del then self:Print("You haven't marked", tostring(name) .. "."); return end
     local v = { by = self:MyName(), note = "", t = self:Now(old.t), del = true }
+    v.sig = self:SignVote(key, v)
     T.votes[self:MyKey()] = v
     self:LedgerVote(key, T.n, v)
     self:Recalc(T)
@@ -2067,6 +2090,7 @@ end
 function KOS:RecordClaim(k, message)
     local before = self:PointsOf(self:MyName())
     local badgesBefore = self:BadgeSet(self:MyName())
+    k.sig = self:SignKill(k)
     self:LedgerKill(k)
     if not self:MergeKill(k) then return false end
     if ns.Sync then ns.Sync:BroadcastKill(k) end

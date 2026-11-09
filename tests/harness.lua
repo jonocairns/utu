@@ -212,6 +212,7 @@ function H.newClient(name, opts)
     c.version = opts.version
 
     local env = setmetatable({}, { __index = base })
+    if opts.bit then env.bit = opts.bit end
     env._G = env
     c.env = env
 

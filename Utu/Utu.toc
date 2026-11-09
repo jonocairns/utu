@@ -2,7 +2,7 @@
 ## Title: Utu
 ## Notes: Guild-shared kill-on-sight list with bounties, a hunter leaderboard and enemy-guild tracking.
 ## Author: jonoc
-## Version: 0.7.9
+## Version: 0.8.0
 ## Category: PvP
 ## SavedVariables: UtuDB
 ## IconTexture: Interface\AddOns\Utu\Media\logo
@@ -22,6 +22,7 @@ Libs\ChatThrottleLib\ChatThrottleLib.lua
 
 Core.lua
 WhatsNew.lua
+Sign.lua
 Caps.lua
 Sync.lua
 Detect.lua
