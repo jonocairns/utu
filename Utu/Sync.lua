@@ -468,7 +468,10 @@ function Sync:SendSighting(T)
     local now = GetTime()
     if lastSighting[key] and now - lastSighting[key] < 120 then return end
     lastSighting[key] = now
-    enqueue(hi, join("W", T.n, GetRealZoneText() or "", GetSubZoneText() or ""))
+    -- map, x, y (where I am: they're within sight) were added in 0.9.0
+    local map, x, y = KOS:MyPosition()
+    enqueue(hi, join("W", T.n, GetRealZoneText() or "", GetSubZoneText() or "",
+        tostring(map or ""), x and string.format("%.4f", x) or "", y and string.format("%.4f", y) or ""))
 end
 
 ------------------------------------------------------------------------
@@ -541,6 +544,7 @@ local function aboutMe(name) return name and KOS:Canonical(name) == KOS:MyKey() 
 
 local function announceLive(kind, it, who)
     if kind == "kill" and not it.assist then KOS:CheckResponder(it.target, it.by) end
+    if kind == "kill" then KOS:SettlePins((KOS:Canonical(it.target))) end -- they're dead: off the map
     if kind == "vote" then
         local T = KOS:GetTarget(it.key)
         if it.del then
@@ -686,6 +690,7 @@ function Sync:OnMessage(text, sender, isRetry)
         map, x, y = finite(map, 1e7), finite(x, 1e7), finite(y, 1e7)
         local firstCall = not KOS:RescueFor(key)
         KOS:NoteDistress(full, senderFull, map, x, y)
+        KOS:NotePin("help", full, senderFull, map, x, y)
         if not firstCall then return end -- someone already called this one in
         local T = KOS:Lookup(key)
         local dist, dir = KOS:DistanceTo(map, x, y)
@@ -730,7 +735,7 @@ function Sync:OnMessage(text, sender, isRetry)
         end
 
     elseif tag == "W" then
-        local name, zone, sub = strsplit(SEP, payload)
+        local name, zone, sub, map, x, y = strsplit(SEP, payload)
         local key = KOS:Canonical(name)
         local T = key and KOS:Lookup(key)
         if not T then return end
@@ -743,6 +748,9 @@ function Sync:OnMessage(text, sender, isRetry)
             .. KOS:Display(T.n) .. "|r (" .. KOS:BountyTag(T) .. ") in " .. T.zone, nil, senderFull)
         if KOS.TrackSighting and not KOS:IsMuted(senderFull) and not KOS:OnlyMutedMarks(T) then
             KOS:TrackSighting(T, senderFull, T.zone)
+        end
+        if not KOS:IsMuted(senderFull) and not KOS:OnlyMutedMarks(T) then
+            KOS:NotePin("seen", T.n, senderFull, finite(map, 1e7), finite(x, 2), finite(y, 2))
         end
         if KOS.RefreshUI then KOS:RefreshUI() end
     end

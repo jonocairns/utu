@@ -5,6 +5,11 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.9.0
+- **Map pins:** open the world map to see guildies' help calls (blue square) and where marked players were just spotted (skull). Hover a pin for who and how long ago. They fade over a few minutes and go when the player is killed. Turn them off with `/utu set mapPins off`.
+- Sightings only get a pin when the guildie who spotted them is on 0.9.0, so get everyone to update.
+- Needs a full game restart (not just `/reload`) to load.
+
 ## 0.8.1
 - Fixed marking and syncing erroring after a `/reload` straight onto 0.8.0. Restart the game once (not just `/reload`) to switch signing on.
 

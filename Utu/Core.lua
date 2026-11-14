@@ -26,6 +26,7 @@ KOS.DEFAULTS = {
     nameplate = true, targetBadge = true, tooltip = true, raidMark = false,
     -- windows
     tracker = true, minimap = true, minimapAngle = 200,
+    mapPins = true,          -- help calls and recent sightings on the world map
     -- guild & group
     announce = true, partyChat = false, guildChat = false,
     chatter = "important",   -- guild activity in chat: "off" | "important" | "all" (always in the Activity tab)
@@ -2049,6 +2050,69 @@ function KOS:RescueFor(key)
 end
 function KOS:ClearDistress(key, victim)
     if key and distress[key] and (not victim or distress[key].victim == victim) then distress[key] = nil end
+    self:SettlePins(key, victim)
+end
+
+------------------------------------------------------------------------
+-- Map pins: where guildies called for help and where KoS players were
+-- just seen. Live only (positions go stale in minutes). Map.lua draws
+-- them; without it they're just kept and expire.
+--   kind "help": name = attacker, by = guildie who called, at their position
+--   kind "seen": name = KoS player, by = who saw them, at the spotter's position
+------------------------------------------------------------------------
+
+KOS.PIN_SECONDS = { help = KOS.RESCUE_WINDOW, seen = 300 }
+local pins = {}
+
+function KOS:NotePin(kind, nameFull, by, map, x, y, at)
+    local key, full = self:Canonical(nameFull)
+    map, x, y = tonumber(map), tonumber(x), tonumber(y)
+    if not key or not self.PIN_SECONDS[kind] or not map or map <= 0 or map ~= math.floor(map) or map > 1e7 then return end
+    if not x or not y or x ~= x or y ~= y or x < 0 or x > 1 or y < 0 or y > 1 or (x == 0 and y == 0) then return end
+    pins[kind .. ":" .. key] = { kind = kind, key = key, name = full, by = by, map = map, x = x, y = y, at = at or GetTime() }
+    if self.RefreshMapPins then self:RefreshMapPins() end
+end
+
+-- /kos pintest: a fake help call and sighting either side of me, so the
+-- map pins can be checked without an enemy around.
+function KOS:PinTest()
+    local map, x, y = self:MyPosition()
+    if not map then self:Print("Can't read your map position here, so there's nowhere to put test pins."); return end
+    local realm = self:MyRealm()
+    self:NotePin("help", "Testganker-" .. realm, "Testguildie-" .. realm, map, math.min(1, x + 0.01), y)
+    self:NotePin("seen", "Testplayer-" .. realm, self:MyName(), map, math.max(0, x - 0.01), y)
+    if self.RefreshMapPins then
+        self:Print("Test pins added either side of you: a help call (blue square) and a sighting (skull). Open the world map (M). They fade over 3-5 minutes.")
+    else
+        self:Print("Test pins added, but the map code isn't loaded yet: restart the game (not just /reload).")
+    end
+end
+
+-- Live pins, oldest first (so the newest draws on top).
+function KOS:MapPins()
+    local now, list = GetTime(), {}
+    for id, p in pairs(pins) do
+        if now - p.at > self.PIN_SECONDS[p.kind] then pins[id] = nil else list[#list + 1] = p end
+    end
+    table.sort(list, function(a, b) return a.at < b.at end)
+    return list
+end
+
+-- A help call is over. If the guildie died (victim given), the attacker
+-- was still there: their help pin becomes a sighting. If the attacker
+-- died, both their pins go.
+function KOS:SettlePins(key, victim)
+    if not key then return end
+    local help = pins["help:" .. key]
+    if victim then
+        if help and help.by == victim then
+            pins["help:" .. key] = nil
+            if self:Lookup(key) then self:NotePin("seen", help.name, help.by, help.map, help.x, help.y, help.at) end
+        end
+    else
+        pins["help:" .. key], pins["seen:" .. key] = nil, nil
+    end
+    if self.RefreshMapPins then self:RefreshMapPins() end
 end
 
 -- I was just killed by an enemy player: record it for the guild.
@@ -2683,6 +2747,7 @@ local HELP = {
     "/kos sos - call nearby guildies for help against your target or attacker",
     "/kos probe - test what this client allows (saved for troubleshooting)",
     "/kos test - show a test alert",
+    "/kos pintest - put a test help call and sighting on your world map",
     "/kos news [version] - what changed in this version, or since the one given",
 }
 
@@ -2780,6 +2845,8 @@ local function onSlash(msg)
         KOS:Probe()
     elseif cmd == "sos" then
         KOS:ManualHelp()
+    elseif cmd == "pintest" then
+        KOS:PinTest()
     elseif cmd == "test" then
         local me = KOS:MyName()
         KOS:Alert("test-test", {
@@ -2816,6 +2883,7 @@ function KOS:SettingChanged(key)
     if key == "targetBadge" and self.RefreshTargetBadge then self:RefreshTargetBadge() end
     if key == "minimap" and self.UpdateMinimapButton then self:UpdateMinimapButton() end
     if key == "tracker" and self.RefreshTracker then self:RefreshTracker() end
+    if key == "mapPins" and self.RefreshMapPins then self:RefreshMapPins() end
 end
 
 ------------------------------------------------------------------------

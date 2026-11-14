@@ -210,6 +210,7 @@ function H.newClient(name, opts)
     c.units = {} -- unit token -> { name=, realm=, guid=, class=, player=true }
     c.db = opts.db
     c.version = opts.version
+    c.noWorldMap = opts.noWorldMap
 
     local env = setmetatable({}, { __index = base })
     if opts.bit then env.bit = opts.bit end
@@ -245,11 +246,54 @@ function H.newClient(name, opts)
     env.C_Map = {
         GetBestMapForUnit = function() return c.map or 1434 end,
         GetPlayerMapPosition = function() return env.CreateVector2D(c.x or 0.5, c.y or 0.5) end,
+        -- zones sit side by side, 10000 yards apart; 1434 is at the origin
         GetWorldPosFromMapPos = function(map, pos)
             local x, y = pos:GetXY()
-            return 0, env.CreateVector2D(x * 3000, y * 3000)
+            return 0, env.CreateVector2D(x * 3000 + (map - 1434) * 10000, y * 3000)
+        end,
+        -- map 1414 is the "continent": twice as big, with 1434 in its top-left quarter
+        GetMapPosFromWorldPos = function(_, world, to)
+            local x, y = world:GetXY()
+            if to == 1414 then return to, env.CreateVector2D(x / 6000, y / 6000) end
+            return to, env.CreateVector2D((x - (to - 1434) * 10000) / 3000, y / 3000)
         end,
     }
+    -- the world map: a canvas that data providers draw on (c.worldMap)
+    if not c.noWorldMap then
+        local canvas = mockObject()
+        c.worldMap = { mapID = 1434, scale = 1, providers = {} }
+        local wm = c.worldMap
+        wm.levels = {
+            definitions = { PIN_FRAME_LEVEL_GROUP_MEMBER = { startLevel = 2900, range = 1 } },
+            GetValidFrameLevel = function(self, kind, i)
+                if kind == "PIN_FRAME_LEVEL_TOPMOST" then return 3000 + math.min(i or 1, 10) - 1 end
+                local d = self.definitions[kind]
+                return d and d.startLevel or 2000
+            end,
+        }
+        wm.canvasMap = {
+            GetMapID = function() return wm.mapID end,
+            GetCanvas = function() return canvas end,
+            GetCanvasScale = function() return wm.scale end,
+            -- like Blizzard's: absolute levels, the player and party arrows
+            -- at 2900, the topmost range starting at 3000
+            GetPinFrameLevelsManager = function()
+                return wm.levels
+            end,
+        }
+        env.WorldMapFrame = mockObject()
+        env.WorldMapFrame.shown = false
+        env.WorldMapFrame.AddDataProvider = function(_, p)
+            wm.providers[#wm.providers + 1] = p
+            p:OnAdded(wm.canvasMap)
+        end
+        -- open the map on `mapID`
+        function wm.open(mapID)
+            wm.mapID = mapID or wm.mapID
+            env.WorldMapFrame.shown = true
+            for _, p in ipairs(wm.providers) do p:RefreshAllData() end
+        end
+    end
     env.GetSubZoneText = function() return c.subzone or "Booty Bay" end
     env.GetNumGuildMembers = function() return #rosterList() end
     env.GetGuildRosterInfo = function(i)

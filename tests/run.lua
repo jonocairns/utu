@@ -2205,5 +2205,157 @@ test("a /reload right after updating (new files not loaded yet) still marks, cla
     eq(#((c.db.diag or {}).errors or {}), 0)
 end)
 
+------------------------------------------------------------------------
+-- World map pins
+------------------------------------------------------------------------
+
+local function pinOf(c, kind, name)
+    for _, p in ipairs(c.KOS:MapPins()) do
+        if p.kind == kind and p.key == c.KOS:Canonical(name) then return p end
+    end
+end
+local function near(a, b) return math.abs(a - b) < 0.001 end
+
+test("map pins: help calls and sightings show on the world map and its continent, and go when the attacker dies", function()
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    c.x, c.y = 0.30, 0.60
+    b.x, b.y = 0.70, 0.20
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    hit(c, "Gankdude")
+    H.advance(2)
+    local p = pinOf(a, "help", "Gankdude")
+    assert(p, "Alice has a help pin")
+    assert(near(p.x, 0.30) and near(p.y, 0.60) and p.map == 1434, "at Carol's position")
+    eq(p.by, "Carol-Forever")
+    local tip = a.KOS:PinTooltip(p)
+    assert(tip[1][1]:find("HELP! Carol"), tip[1][1])
+    assert(tip[2][1]:find("Gankdude"), tip[2][1])
+    -- Bob spots him: a sighting pin at Bob's position for everyone
+    b.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    local s = pinOf(a, "seen", "Gankdude")
+    assert(s and near(s.x, 0.70) and near(s.y, 0.20), "Alice has Bob's sighting where Bob was")
+    assert(a.KOS:PinTooltip(s)[2][1]:find("by Bob"), a.KOS:PinTooltip(s)[2][1])
+    local mine = pinOf(b, "seen", "Gankdude")
+    assert(mine and b.KOS:PinTooltip(mine)[2][1]:find("by you"), "Bob's own sighting is pinned for him")
+    -- drawn on the zone map, on the continent, not on another zone
+    a.worldMap.open(1434)
+    eq(a.KOS.mapPinsShown, 2, "both pins on the zone map")
+    eq(a.KOS.mapPinLevel, 2899, "above the map art and icons, just under the player arrows")
+    local arrows = a.worldMap.levels.definitions.PIN_FRAME_LEVEL_GROUP_MEMBER
+    a.worldMap.levels.definitions.PIN_FRAME_LEVEL_GROUP_MEMBER = nil
+    a.worldMap.open(1434)
+    eq(a.KOS.mapPinLevel, 3010, "above the map's topmost pins with no arrow layer")
+    a.worldMap.levels.definitions.PIN_FRAME_LEVEL_GROUP_MEMBER = arrows
+    local manager = a.worldMap.canvasMap.GetPinFrameLevelsManager
+    a.worldMap.canvasMap.GetPinFrameLevelsManager = nil
+    a.worldMap.open(1434)
+    eq(a.KOS.mapPinLevel, 3002, "still well above the canvas with no level manager")
+    a.worldMap.canvasMap.GetPinFrameLevelsManager = manager
+    a.worldMap.open(1414)
+    eq(a.KOS.mapPinsShown, 2, "and on the continent")
+    local x, y = a.KOS.TranslateMapPos(1434, 0.30, 0.60, 1414)
+    assert(near(x, 0.15) and near(y, 0.30), "scaled into the continent's corner")
+    a.worldMap.open(1431)
+    eq(a.KOS.mapPinsShown, 0, "not on a different zone")
+    -- zooming in keeps the pins working
+    a.worldMap.open(1434)
+    a.worldMap.scale = 2
+    a.worldMap.providers[1]:OnCanvasScaleChanged()
+    eq(a.KOS.mapPinsShown, 2)
+    -- the setting hides them
+    H.slash(a, "set mapPins off")
+    eq(a.KOS.mapPinsShown, 0, "hidden when turned off")
+    H.slash(a, "set mapPins on")
+    eq(a.KOS.mapPinsShown, 2)
+    -- Alice kills him: his pins go
+    killEvent(a, "Gankdude")
+    H.advance(2)
+    eq(pinOf(a, "help", "Gankdude"), nil, "help pin gone after the rescue")
+    eq(pinOf(a, "seen", "Gankdude"), nil, "and his sighting")
+    eq(pinOf(b, "help", "Gankdude"), nil, "for guildies too")
+    eq(#((a.db.diag or {}).errors or {}), 0, "no errors")
+end)
+
+test("map pins expire; a death turns the help pin into a sighting; old and muted sightings add none", function()
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    c.x, c.y = 0.40, 0.40
+    dieTo(c, "Gankdude")
+    H.advance(5)
+    eq(pinOf(a, "help", "Gankdude"), nil, "no help pin once Carol's dead")
+    local s = pinOf(a, "seen", "Gankdude")
+    assert(s and near(s.x, 0.40) and s.by == "Carol-Forever", "he's pinned where she died")
+    H.advance(301)
+    eq(#a.KOS:MapPins(), 0, "sightings expire after 5 minutes")
+    -- an older client's sighting has no position
+    a.Sync:OnMessage("W\tGankdude-Forever\tStranglethorn Vale\tBooty Bay", "Dave-Forever")
+    eq(#a.KOS:MapPins(), 0, "no pin without a position")
+    -- garbage positions are ignored
+    a.Sync:OnMessage("W\tGankdude-Forever\tStranglethorn Vale\tBooty Bay\t1434\t7\tnan", "Dave-Forever")
+    eq(#a.KOS:MapPins(), 0, "no pin for an off-map position")
+    -- a muted guildie's sightings stay off my map, like the tracker
+    H.slash(a, "mute Bob")
+    b.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    eq(pinOf(a, "seen", "Gankdude"), nil, "Bob is muted")
+    -- the sighting message still fits with long zone names
+    local W
+    for _, m in ipairs(H.sent) do if m.msg:sub(1, 1) == "W" then W = m.msg end end
+    assert(W and W:find("\t1434\t0%.5000\t0%.5000$"), "position appended: " .. tostring(W))
+    local long = H.newClient("Ezekielthegr")
+    long.zone, long.subzone = string.rep("Z", 60), string.rep("S", 60)
+    H.advance(20)
+    long.KOS:Mark("Gankdudesalt", "")
+    long.units.nameplate1 = { name = "Gankdudesalt", guid = "Player-1-0002" }
+    H.fire(long, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    for _, m in ipairs(H.sent) do if m.msg:sub(1, 1) == "W" then W = m.msg end end
+    assert(W:find("Gankdudesalt") and #W <= 255, "fits: " .. #W)
+end)
+
+test("map pins: a /reload before Map.lua loads, or no world map, still records help calls and sightings", function()
+    local a = H.newClient("Alice", { missing = { ["Map.lua"] = true } })
+    local b = H.newClient("Bob", { noWorldMap = true })
+    local c = H.newClient("Carol")
+    H.advance(20)
+    b.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    hit(c, "Gankdude")
+    H.advance(2)
+    assert(feedHas(a, "HELP!") and feedHas(b, "HELP!"), "help calls arrive")
+    assert(pinOf(a, "help", "Gankdude") and pinOf(b, "help", "Gankdude"), "pins kept for later")
+    b.units.nameplate1 = { name = "Gankdude", guid = "Player-1-0001" }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(2)
+    H.slash(a, "set mapPins off")
+    eq(#((a.db.diag or {}).errors or {}), 0, "no errors without Map.lua")
+    eq(#((b.db.diag or {}).errors or {}), 0, "no errors without a world map")
+end)
+
+test("map pins: /kos pintest drops a help call and a sighting beside me", function()
+    local a = H.newClient("Alice")
+    a.x, a.y = 0.40, 0.60
+    H.advance(5)
+    H.slash(a, "pintest")
+    local help, seen = pinOf(a, "help", "Testganker"), pinOf(a, "seen", "Testplayer")
+    assert(help and near(help.x, 0.41) and near(help.y, 0.60), "help pin to my east")
+    assert(seen and near(seen.x, 0.39) and seen.by == "Alice-Forever", "my sighting to my west")
+    assert(H.chatContains(a, "Open the world map"), "tells me where to look")
+    a.worldMap.open(1434)
+    eq(a.KOS.mapPinsShown, 2)
+    eq(#H.sent - countSent("H"), 0, "nothing sent to the guild")
+    local b = H.newClient("Bob", { missing = { ["Map.lua"] = true } })
+    H.advance(5)
+    H.slash(b, "pintest")
+    assert(H.chatContains(b, "restart the game"), "says to restart when Map.lua isn't loaded")
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

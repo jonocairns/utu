@@ -94,6 +94,8 @@ function KOS:RecordSighting(T)
         T.seenBy = self:MyName()
     end
     if self.TrackSighting then self:TrackSighting(T, self:MyName(), zoneString()) end
+    local map, x, y = self:MyPosition()
+    self:NotePin("seen", T.n, self:MyName(), map, x, y)
     self:ShareSighting(T)
     if self.RefreshUI then self:RefreshUI() end
 end
