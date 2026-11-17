@@ -797,6 +797,7 @@ function KOS:InitDB()
         end
     end
     self:TidyLedgers()
+    self:TidyGrudges() -- personal: hated players, my deaths to each player
     -- make the signing key now, so it's saved even if nothing is signed
     -- this session (a crash in the session that made it would lose it)
     if self.SigKeys then self:SigKeys() end
@@ -2264,6 +2265,265 @@ function KOS:NemesisOf(name)
 end
 
 ------------------------------------------------------------------------
+-- Grudges: who really got to you. Personal: kept in this account's saved
+-- data, never sent, and no effect on bounties or points.
+--   * every death to a player (confirmed, or the only enemy on me) goes
+--     in my own log, which outlasts the guild's gank horizon; camping is
+--     worked out from it
+--   * "Hated" is the one thing set by hand, for players who went over the
+--     line (an escort-quest gank, corpse camping). Hated players alert
+--     even after they drop off the guild list.
+------------------------------------------------------------------------
+
+KOS.CAMP_KILLS = 3            -- this many deaths in a row to one player...
+KOS.CAMP_GAP = 600            -- ...each within this many seconds of the last = camped
+KOS.GRUDGE_DEATHS_KEPT = 30   -- per killer
+KOS.GRUDGE_KILLERS_KEPT = 300
+local SAME_DEATH = 30         -- seconds; RecordDeath's debounce
+
+-- On load: drop damaged records and re-key with the current Canonical.
+function KOS:TidyGrudges()
+    local db = self.db
+    local function tidy(name, fix)
+        local old = type(db[name]) == "table" and db[name] or {}
+        local new = {}
+        for _, r in pairs(old) do
+            local key, full
+            if type(r) == "table" then key, full = self:Canonical(r.n) end
+            if key and fix(r) then
+                r.n = full
+                new[key] = r
+            end
+        end
+        db[name] = new
+    end
+    tidy("hated", function(r)
+        if type(r.t) ~= "number" or r.t ~= r.t then return false end
+        if type(r.guid) ~= "string" then r.guid = nil end
+        return true
+    end)
+    tidy("myDeaths", function(r)
+        if type(r.d) ~= "table" then return false end
+        local d = {}
+        for _, e in ipairs(r.d) do
+            if type(e) == "table" and type(e.t) == "number" and e.t == e.t and type(e.v) == "string" then
+                d[#d + 1] = { t = math.floor(e.t), v = e.v, u = e.u and true or nil }
+            end
+        end
+        table.sort(d, function(a, b) return a.t < b.t end)
+        r.d = d
+        return #d > 0
+    end)
+end
+
+-- My death to killerFull at `at`. unconfirmed: guessed (the only enemy on
+-- me, or the death recap's killer) and not picked from the death prompt.
+function KOS:NoteMyDeath(killerFull, at, unconfirmed)
+    local key, full = self:Canonical(killerFull)
+    local me = self:MyKey()
+    local all = self.db and self.db.myDeaths
+    if not key or not me or key == me or not all then return end
+    local t = math.floor(at or GetServerTime())
+    local rec = all[key]
+    if not rec then
+        local n, oldestKey, oldestT = 0, nil, nil
+        for k, r in pairs(all) do
+            n = n + 1
+            local last = r.d[#r.d].t
+            if not oldestT or last < oldestT then oldestKey, oldestT = k, last end
+        end
+        if n >= self.GRUDGE_KILLERS_KEPT and oldestKey then all[oldestKey] = nil end
+        rec = { n = full, d = {} }
+        all[key] = rec
+    end
+    rec.n = full
+    for _, e in ipairs(rec.d) do
+        if e.v == me and math.abs(e.t - t) <= SAME_DEATH then
+            if not unconfirmed then e.u = nil end
+            return
+        end
+    end
+    local i = #rec.d + 1
+    while i > 1 and rec.d[i - 1].t > t do i = i - 1 end
+    table.insert(rec.d, i, { t = t, v = me, u = unconfirmed or nil })
+    while #rec.d > self.GRUDGE_DEATHS_KEPT do table.remove(rec.d, 1) end
+end
+
+-- The death prompt was answered (Done / None): guesses for that death that
+-- weren't picked go. picked: set of killer keys.
+function KOS:SettleMyDeath(at, picked)
+    local me, all = self:MyKey(), self.db and self.db.myDeaths
+    if not me or not all or not at then return end
+    for key, rec in pairs(all) do
+        if not (picked and picked[key]) then
+            for i = #rec.d, 1, -1 do
+                local e = rec.d[i]
+                if e.u and e.v == me and math.abs(e.t - at) <= SAME_DEATH then table.remove(rec.d, i) end
+            end
+            if #rec.d == 0 then all[key] = nil end
+        end
+    end
+end
+
+-- My deaths to `key`, oldest first: my own log, plus ganks of this
+-- character the guild has on record (history from before the log).
+function KOS:MyDeathsTo(key)
+    local out, me = {}, self:MyKey()
+    local rec = key and self.db and self.db.myDeaths and self.db.myDeaths[key]
+    if rec then
+        for _, e in ipairs(rec.d) do out[#out + 1] = { t = e.t, v = e.v } end
+    end
+    if key and me then
+        for _, d in ipairs(ganksBy(key)) do
+            if self:Canonical(d.victim) == me then
+                local dup = false
+                for _, e in ipairs(out) do
+                    if e.v == me and math.abs(e.t - d.t) <= SAME_DEATH then dup = true; break end
+                end
+                if not dup then out[#out + 1] = { t = d.t, v = me } end
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.t < b.t end)
+    return out
+end
+
+-- The worst camp in a list of deaths: a run of CAMP_KILLS+ deaths of one
+-- character, each within CAMP_GAP of the last. { n, span, t } or nil.
+function KOS.WorstCamp(deaths)
+    local byV = {}
+    for _, e in ipairs(deaths) do
+        byV[e.v] = byV[e.v] or {}
+        table.insert(byV[e.v], e.t)
+    end
+    local best
+    for _, ts in pairs(byV) do
+        local start = 1
+        for i = 1, #ts do
+            if i > 1 and ts[i] - ts[i - 1] > KOS.CAMP_GAP then start = i end
+            local n = i - start + 1
+            local last = (i == #ts) or (ts[i + 1] - ts[i] > KOS.CAMP_GAP)
+            if last and n >= KOS.CAMP_KILLS and (not best or n > best.n or (n == best.n and ts[i] > best.t)) then
+                best = { n = n, span = ts[i] - ts[start], t = ts[i] }
+            end
+        end
+    end
+    return best
+end
+
+-- Everything personal about `name`:
+-- { hated = record or nil, deaths = n, last = t, camp = { n, span, t }, kills = n }
+function KOS:GrudgeOf(name)
+    local key = self:Canonical(name)
+    local g = { deaths = 0, kills = 0 }
+    if not key then return g end
+    g.hated = self:Hated(key)
+    local deaths = self:MyDeathsTo(key)
+    g.deaths = #deaths
+    g.last = deaths[#deaths] and deaths[#deaths].t
+    g.camp = KOS.WorstCamp(deaths)
+    local me = self:MyKey()
+    for _, k in ipairs(killsOn(key)) do
+        if self:Canonical(k.by) == me then g.kills = g.kills + 1 end
+    end
+    return g
+end
+
+local function minutes(span) return math.max(1, math.floor(span / 60 + 0.5)) .. " min" end
+local function times(n) return n == 1 and "once" or (n .. "x") end
+
+-- For the banner: what sets them apart from a drive-by, or nil.
+function KOS:GrudgeShort(g)
+    if g.camp then return "camped you " .. g.camp.n .. "x in " .. minutes(g.camp.span) end
+    if g.deaths >= 2 then return "killed you " .. g.deaths .. "x" end
+end
+
+-- The whole story, for chat, tooltips and the list ("" if there's none).
+function KOS:GrudgeText(g)
+    local parts = {}
+    if g.hated then parts[#parts + 1] = "|cffff2020hated|r" end
+    if g.deaths > 0 then parts[#parts + 1] = "killed you " .. times(g.deaths) .. " (last " .. KOS.Ago(g.last) .. ")" end
+    if g.camp then parts[#parts + 1] = "camped you " .. g.camp.n .. "x in " .. minutes(g.camp.span) .. " (" .. KOS.Ago(g.camp.t) .. ")" end
+    if g.kills > 0 then parts[#parts + 1] = "you got them " .. times(g.kills) end
+    return table.concat(parts, ", ")
+end
+
+function KOS:Hated(name)
+    local key = self:Canonical(name)
+    return key and self.db and self.db.hated and self.db.hated[key] or nil
+end
+
+function KOS:SetHated(name, on, guid)
+    local key, full = self:Canonical(name)
+    if not key or not self.db then self:Print("Not a valid character name:", tostring(name)); return end
+    if key == self:MyKey() then return end
+    if on and self:RankOf(full) ~= nil then
+        self:Print(self:Display(full) .. " is a guildie. To ignore their marks, use /utu mute.")
+        return
+    end
+    local hated = self.db.hated
+    if on then
+        local old = hated[key]
+        hated[key] = { n = full, t = old and old.t or GetServerTime(), guid = guid or (old and old.guid) }
+        self:Print("You hate |cffff6060" .. self:Display(full) .. "|r. They'll stand out when they turn up (only you see this).")
+    elseif hated[key] then
+        hated[key] = nil
+        self:Print("You no longer hate " .. self:Display(full) .. ".")
+    end
+    self:Changed()
+end
+
+-- A hated player for detection, when they aren't on the guild list: their
+-- old list record if there is one, else a stand-in. Matches renames by GUID.
+local hatedStandIns = {}
+function KOS:HatedTarget(key, guid)
+    local hated = self.db and self.db.hated
+    if not hated or next(hated) == nil then return nil end
+    local rec = key and hated[key]
+    if rec then
+        if guid and not rec.guid then rec.guid = guid end
+    elseif guid then
+        for k, r in pairs(hated) do
+            if r.guid == guid then rec, key = r, k; break end
+        end
+    end
+    if not rec then return nil end
+    local T = self:GetTarget(key)
+    if not T then
+        T = hatedStandIns[key] or { n = rec.n, votes = {}, w = 0, on = false }
+        hatedStandIns[key] = T
+    end
+    return T, key
+end
+
+-- Grudges for /utu grudges: hated first, then camps, then most deaths.
+function KOS:GrudgeList()
+    local keys, me = {}, self:MyKey()
+    for k in pairs(self.db.hated) do keys[k] = true end
+    for k in pairs(self.db.myDeaths) do keys[k] = true end
+    for _, d in pairs(self:Deaths()) do
+        if self:Canonical(d.victim) == me then
+            local k = self:Canonical(d.killer)
+            if k then keys[k] = true end
+        end
+    end
+    local rows = {}
+    for k in pairs(keys) do
+        local h, r, T = self.db.hated[k], self.db.myDeaths[k], self:GetTarget(k)
+        local g = self:GrudgeOf(k)
+        g.n = (h and h.n) or (r and r.n) or (T and T.n) or k
+        if g.hated or g.deaths > 0 then rows[#rows + 1] = g end
+    end
+    table.sort(rows, function(a, b)
+        if (a.hated ~= nil) ~= (b.hated ~= nil) then return a.hated ~= nil end
+        if (a.camp ~= nil) ~= (b.camp ~= nil) then return a.camp ~= nil end
+        if a.deaths ~= b.deaths then return a.deaths > b.deaths end
+        return a.n < b.n
+    end)
+    return rows
+end
+
+------------------------------------------------------------------------
 -- Badges: computed from the synced claim history (last KILL_HORIZON days),
 -- so every guildie sees the same ones without extra sync traffic.
 ------------------------------------------------------------------------
@@ -2440,6 +2700,9 @@ function KOS:ResolveUnit(unit, info)
     local guid = info.guid
     local T, key = self:Lookup(unitKey, guid)
     local g = self:ObserveUnit(info, T)
+    if T then return T, key, full, unitKey, info end
+    -- hated by me but off the guild list: still flagged, just for me
+    T, key = self:HatedTarget(unitKey, guid)
     if T then return T, key, full, unitKey, info end
     if self.S.guildAlerts and self:IsKosGuild(g) then
         return self:VirtualTarget(select(2, self:Canonical(full)), guid, info.class, g), unitKey, full, unitKey, info
@@ -2715,6 +2978,11 @@ local function setupMenus()
                 root:CreateButton((T and T.on) and "Add my mark" or "Mark as Kill on Sight...",
                     function() KOS:PromptNote(name, guid, class) end)
             end
+            if KOS:Hated(name) then
+                root:CreateButton("Stop hating them", function() KOS:SetHated(name, false) end)
+            else
+                root:CreateButton("Hate them (only you see this)", function() KOS:SetHated(name, true, guid) end)
+            end
             if T and T.on and KOS:CanPardon(KOS:MyName()) then
                 root:CreateButton("Pardon (clear all marks)", function()
                     StaticPopup_Show("UTU_PARDON", KOS:Display(T.n), nil, T.n)
@@ -2734,6 +3002,8 @@ local HELP = {
     "/kos target [note] - mark your current target with a note",
     "/kos add Name [note] - mark a player by name (use quotes for names with spaces)",
     "/kos rm [Name] - remove your mark",
+    "/kos hate [Name] / unhate [Name] - flag a player who went over the line (just for you); target if no name",
+    "/kos grudges - who has killed you, camped you, or is hated",
     "/kos mute Name / unmute Name - ignore a guildie's marks and sightings (just for you); /kos mute lists them",
     "/kos pardon Name - clear everyone's marks (officers)",
     "/kos list [filter] - print the list",
@@ -2770,6 +3040,27 @@ local function onSlash(msg)
     elseif cmd == "rm" or cmd == "remove" or cmd == "unmark" then
         if rest == "" then rest = KOS:UnitFull("target") or "" end
         KOS:Unmark(rest)
+    elseif cmd == "hate" or cmd == "unhate" then
+        local name = rest:match('^"(.-)"') or rest
+        local guid
+        if name == "" then
+            local info = KOS:UnitInfo("target")
+            name, guid = info and info.full or "", info and info.guid
+        end
+        if name == "" then KOS:Print("Target a player, or type /utu " .. cmd .. " Name."); return end
+        KOS:SetHated(name, cmd == "hate", guid)
+    elseif cmd == "grudges" or cmd == "grudge" then
+        local rows = KOS:GrudgeList()
+        if #rows == 0 then
+            KOS:Print("No grudges yet: nobody has killed you since Utu started keeping track. /utu hate Name flags a player.")
+            return
+        end
+        KOS:Print("Your grudges (just for you):")
+        for i = 1, math.min(15, #rows) do
+            local g = rows[i]
+            DEFAULT_CHAT_FRAME:AddMessage("  |cffff6060" .. KOS:Display(g.n) .. "|r - " .. KOS:GrudgeText(g))
+        end
+        if #rows > 15 then DEFAULT_CHAT_FRAME:AddMessage("  |cff888888+" .. (#rows - 15) .. " more|r") end
     elseif cmd == "mute" or cmd == "unmute" then
         local name = rest:match('^"(.-)"') or rest
         if name == "" then

@@ -263,7 +263,8 @@ local function buildWanted()
         r.title:SetText(classColor(T.class) .. KOS:Display(T.n) .. "|r"
             .. (KOS:IsTopBounty(T) and " |cffffd100* Top Bounty|r" or "")
             .. (T.guild and (" |cff888888<" .. T.guild .. ">|r") or "")
-            .. (KOS:MyVote(T) and " |cff40ff40(you)|r" or ""))
+            .. (KOS:MyVote(T) and " |cff40ff40(you)|r" or "")
+            .. (KOS:Hated(T.n) and " |cffff2020(hated)|r" or ""))
         r.right:SetText(T.seen and ("seen " .. KOS.Ago(T.seen)) or "")
         local note, by = KOS:TopNote(T)
         r.sub:SetText(KOS:BountyTag(T) .. "  " .. (note ~= "" and ("|cffcccccc" .. note .. "|r |cff777777- " .. KOS:Display(by) .. "|r") or ""))
@@ -291,6 +292,20 @@ local function buildWanted()
     d.myNoteLabel = Text(d, "GameFontNormalSmall")
     d.myNoteLabel:SetPoint("BOTTOMLEFT", 12, 84)
     d.myNoteLabel:SetText("Your mark")
+    -- hate: personal, never synced (see KOS:SetHated)
+    d.hate = Button(d, "Hate them", 100, function()
+        local T = selectedTarget()
+        if T then KOS:SetHated(T.n, not KOS:Hated(T.n), T.guid) end
+    end)
+    d.hate:SetPoint("BOTTOMRIGHT", -12, 80)
+    d.hate:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Hate them")
+        GameTooltip:AddLine("For players who went over the line. They stand out when they turn up, even after "
+            .. "they drop off the list. Only you see it; bounties don't change.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    d.hate:SetScript("OnLeave", function() GameTooltip:Hide() end)
     d.myNote = Edit(d, DETAIL_W - 32, "Why? (optional)")
     d.myNote:SetPoint("BOTTOMLEFT", 18, 58)
     d.myNote:SetMaxLetters(KOS.NOTE_MAX)
@@ -362,7 +377,7 @@ local function refreshWanted()
 
     local d, T = wanted.d, selectedTarget()
     local show = T ~= nil
-    for _, w in ipairs({ d.title, d.subtitle, d.bar, d.value, d.body, d.myNoteLabel, d.myNote, d.save, d.unmark, d.mute }) do
+    for _, w in ipairs({ d.title, d.subtitle, d.bar, d.value, d.body, d.myNoteLabel, d.myNote, d.save, d.unmark, d.mute, d.hate }) do
         w:SetShown(show)
     end
     d.placeholder:SetShown(not show)
@@ -408,7 +423,11 @@ local function refreshWanted()
     lines[#lines + 1] = "  Killed by us " .. kills .. "x this season"
         .. (latest and (" (last: " .. KOS:Display(latest.by) .. ", " .. KOS.Ago(latest.t) .. ")") or "")
     local nem = KOS:NemesisOf(KOS:MyName())
-    if nem and KOS:Canonical(nem.killer) == KOS:Canonical(T.n) then
+    local isNemesis = nem and KOS:Canonical(nem.killer) == KOS:Canonical(T.n)
+    local story = KOS:GrudgeText(KOS:GrudgeOf(T.n))
+    if story ~= "" then
+        lines[#lines + 1] = "  |cffff4040" .. (isNemesis and "Your nemesis" or "You") .. "|r: " .. story
+    elseif isNemesis then
         lines[#lines + 1] = "  |cffff4040Your nemesis|r: they've killed you " .. nem.theirKills .. "x, you've killed them " .. nem.myKills .. "x"
     end
     d.body:SetText(table.concat(lines, "\n"))
@@ -416,6 +435,7 @@ local function refreshWanted()
     local mine = KOS:MyVote(T)
     d.save:SetText(mine and "Save & refresh" or "Add my mark")
     d.unmark:SetEnabled(mine ~= nil)
+    d.hate:SetText(KOS:Hated(T.n) and "|cffff6060Hated|r - undo" or "Hate them")
     local others = false
     for _, mark in ipairs(KOS:ActiveVotes(T)) do
         if KOS:Canonical(mark.by) ~= KOS:MyKey() then others = true end

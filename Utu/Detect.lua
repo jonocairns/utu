@@ -55,6 +55,7 @@ local function label(T) return KOS:BountyTag(T) end
 -- one summary banner. Sightings are shared separately, on the older rule:
 -- again whenever a player turns up after SHARE_GAP seconds unseen.
 local alerted = {}  -- list key -> true once alerted this visit
+local quietNoted = {} -- list key -> true once a hated player got a quiet chat line this visit
 local lastSeen = {} -- list key -> GetTime() of the latest sighting
 local SHARE_GAP = 180
 local visitZone
@@ -65,6 +66,7 @@ local function newVisit()
     local zone = GetRealZoneText and GetRealZoneText() or ""
     if zone ~= "" and zone ~= visitZone then
         wipe(alerted)
+        wipe(quietNoted)
         visitZone = zone
     end
 end
@@ -74,6 +76,7 @@ KOS:On("ZONE_CHANGED_NEW_AREA", function()
 end)
 KOS:On("PLAYER_ENTERING_WORLD", function()
     wipe(alerted)
+    wipe(quietNoted)
     visitZone = nil
     newVisit()
     C_Timer.After(1, newVisit)
@@ -96,7 +99,8 @@ function KOS:RecordSighting(T)
     if self.TrackSighting then self:TrackSighting(T, self:MyName(), zoneString()) end
     local map, x, y = self:MyPosition()
     self:NotePin("seen", T.n, self:MyName(), map, x, y)
-    self:ShareSighting(T)
+    -- a hated player who isn't on the guild list is my business only
+    if T.virtual or T.on then self:ShareSighting(T) end
     if self.RefreshUI then self:RefreshUI() end
 end
 local recentAlerts = {}
@@ -122,19 +126,26 @@ function KOS:Alert(key, T, how, isTest, seenAs)
     local S = self.S
     local lvl = T.virtual and 0 or self:LevelOf(T)
     local mine = not T.virtual and self:MyVote(T) ~= nil
+    -- hated (by me): stands out, re-alerts, and isn't lost in a crowd
+    local hated = not T.virtual and self:Hated(key) ~= nil
     if not isTest then
-        if self:OnlyMutedMarks(T) then return end -- listed only by guildies you muted
+        if not hated and self:OnlyMutedMarks(T) then return end -- listed only by guildies you muted
         -- cold bounties go quiet, except players you marked yourself (if set)
-        if not T.virtual and lvl < (S.minLevel or 1) and not (mine and S.alwaysMine) then return end
+        if not T.virtual and not hated and lvl < (S.minLevel or 1) and not (mine and S.alwaysMine) then return end
         -- KoS-guild members only get a skull unless you asked for banners
         if T.virtual and not S.guildBanners then return end
         local now = GetTime()
         local fresh = not lastSeen[key] or now - lastSeen[key] > SHARE_GAP
         lastSeen[key] = now
         -- already warned this visit, or somewhere quiet (which doesn't use up
-        -- the warning): just share the sighting
+        -- the warning): just share the sighting. A hated player warns again
+        -- whenever they turn up after a few minutes unseen.
         local quietNow = (S.quietResting and IsResting and IsResting()) or (not S.alertsInPvP and self:InPvPInstance())
-        if alerted[key] or quietNow then
+        if (alerted[key] and not (hated and fresh)) or quietNow then
+            if quietNow and hated and not alerted[key] and not quietNoted[key] then
+                quietNoted[key] = true
+                self:Print("|cffff2020" .. self:Display(T.n) .. "|r, who you hate, is nearby.")
+            end
             if fresh then self:RecordSighting(T) end
             return
         end
@@ -142,7 +153,7 @@ function KOS:Alert(key, T, how, isTest, seenAs)
         for i = #recentAlerts, 1, -1 do
             if now - recentAlerts[i] > 15 then table.remove(recentAlerts, i) end
         end
-        if #recentAlerts >= 3 then
+        if #recentAlerts >= 3 and not hated then
             -- a crowd: one summary banner instead of one each
             if not burst then
                 burst = { n = 0 }
@@ -158,23 +169,35 @@ function KOS:Alert(key, T, how, isTest, seenAs)
 
     local name = self:Display(T.n)
     if seenAs then name = name .. " (now " .. self:Display(seenAs) .. ")" end
-    local note = self:TopNote(T)
-    local loud = S.escalate and not T.virtual and lvl >= (S.loudLevel or 20)
+    -- my own note says the most; otherwise the newest guildie's
+    local myVote = not T.virtual and self:MyVote(T)
+    local note = (myVote and myVote.note ~= "" and myVote.note) or self:TopNote(T)
+    local grudge = not T.virtual and self:GrudgeOf(key) or nil
+    local short = grudge and self:GrudgeShort(grudge)
+    local listed = not (hated and not T.on) -- hated players can be off the guild list
+    local loud = (S.escalate and not T.virtual and lvl >= (S.loudLevel or 20)) or hated
     local quiet = not isTest and ((S.quietResting and IsResting and IsResting())
         or (not S.alertsInPvP and self:InPvPInstance()))
 
     if not quiet then
         if S.banner and RaidNotice_AddMessage and RaidWarningFrame then
-            local tier = T.virtual and "KOS GUILD" or (KOS.BountyBand(lvl).name:upper() .. " LV " .. lvl)
+            local text
+            if T.virtual then text = "KOS GUILD: " .. name
+            elseif listed then text = KOS.BountyBand(lvl).name:upper() .. " LV " .. lvl .. ": " .. name .. (hated and " (HATED)" or "")
+            else text = "HATED: " .. name end
+            text = text .. (short and (" - " .. short) or "") .. (note ~= "" and (" - " .. note) or "")
             local r, g, b = self:BountyRGB(T)
-            RaidNotice_AddMessage(RaidWarningFrame, tier .. ": " .. name .. (note ~= "" and (" - " .. note) or ""),
-                { r = r, g = g, b = b })
+            if hated then r, g, b = 1, 0.13, 0.13 end
+            RaidNotice_AddMessage(RaidWarningFrame, text, { r = r, g = g, b = b })
         end
         self:PlayAlertSound(S.sound)
         if loud and S.sound ~= "raid" then PlaySound(8959, "Master") end
         if S.chat then
-            self:Print("|cffff6060" .. name .. "|r is nearby -", label(T), note ~= "" and (": " .. note) or "",
-                T.virtual and "" or ("|cff888888(worth " .. (self:ClaimValue(T)) .. " pts)|r"))
+            local tag = listed and label(T) or "|cffff2020hated|r (not on the guild list)"
+            self:Print("|cffff6060" .. name .. "|r is nearby -", tag, note ~= "" and (": " .. note) or "",
+                (T.virtual or not listed) and "" or ("|cff888888(worth " .. (self:ClaimValue(T)) .. " pts)|r"))
+            local story = grudge and self:GrudgeText(grudge) or ""
+            if story ~= "" then self:Print("  You and " .. self:Display(T.n) .. ": " .. story) end
         end
         if (S.flash or loud) and self.Flash then self:Flash(loud) end
     end
@@ -274,6 +297,7 @@ function KOS:CheckName(raw, guid, how)
     local key = keyFor(raw)
     if not key then return end
     local T, k = self:Lookup(key, guid)
+    if not T then T, k = self:HatedTarget(key, guid) end
     if not T then
         local g = self:GuildOfGUID(guid)
         if self.S.guildAlerts and self:IsKosGuild(g) then
@@ -381,6 +405,7 @@ local function onPlayerDead()
     local _, full = KOS:Canonical(hit.name)
     if not full then return end
     KOS:RecordDeath(full, zoneString())
+    KOS:NoteMyDeath(full, GetServerTime())
     local lvl = KOS:LevelOfGUID(hit.guid)
     local levels = lvl and string.format(" (lvl %d vs my %d)", lvl, UnitLevel("player")) or ""
     KOS:AutoMark(full, hit.guid, nil, zoneString(), levels)
@@ -508,6 +533,9 @@ local function offerKillers(at, zone, recent)
     for _, a in ipairs(recent) do add(a.full, a.guid, a.level, a.class) end
     if #cands == 0 or not KOS:InWorld() or KOS:ListKey() == nil then return end
     while #cands > 3 do table.remove(cands) end
+    -- my own grudge log counts the death even if the prompt goes unanswered,
+    -- when it's clear who it was: the only enemy on me, or the recap's killer
+    if #cands == 1 or cands[1].why == "death recap" then KOS:NoteMyDeath(cands[1].full, at, true) end
     if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone) end
 end
 
@@ -523,6 +551,7 @@ end
 function KOS:ConfirmKiller(c, at, zone)
     zone = zone or zoneString()
     self:RecordDeath(c.full, zone, at)
+    self:NoteMyDeath(c.full, at)
     local myLevel = UnitLevel("player")
     local levels = (c.level and myLevel) and string.format(" (lvl %d vs my %d)", c.level, myLevel) or ""
     self:AutoMark(c.full, c.guid, c.class, zone, levels)
@@ -704,8 +733,15 @@ local function onTooltipUnit(tt)
         tt:Show()
         return
     end
-    tt:AddLine("|T" .. SKULL .. ":14|t |cffff2020Kill on Sight|r - " .. KOS:BountyTag(T)
-        .. " |cffffd100(" .. (KOS:ClaimValue(T)) .. " pts to you)|r")
+    local grudge = KOS:GrudgeOf(T.n)
+    if T.on then
+        tt:AddLine("|T" .. SKULL .. ":14|t |cffff2020Kill on Sight|r - " .. KOS:BountyTag(T)
+            .. " |cffffd100(" .. (KOS:ClaimValue(T)) .. " pts to you)|r")
+    else -- hated, off the guild list
+        tt:AddLine("|T" .. SKULL .. ":14|t |cffff2020Hated|r |cff888888(not on the guild list)|r")
+    end
+    local story = KOS:GrudgeText(grudge)
+    if story ~= "" then tt:AddLine("You: " .. story, 1, 0.5, 0.5, true) end
     if KOS:OnlyMutedMarks(T) then tt:AddLine("Only marked by guildies you muted", 0.6, 0.6, 0.6) end
     local votes = KOS:ActiveVotes(T)
     for i = #votes, math.max(1, #votes - 2), -1 do

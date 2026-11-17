@@ -2357,5 +2357,175 @@ test("map pins: /kos pintest drops a help call and a sighting beside me", functi
     assert(H.chatContains(b, "restart the game"), "says to restart when Map.lua isn't loaded")
 end)
 
+
+------------------------------------------------------------------------
+-- Grudges (personal: never synced, no effect on bounties)
+------------------------------------------------------------------------
+
+local function noErrors(c) eq(#((c.db.diag or {}).errors or {}), 0, "handler errors: " .. tostring(((c.db.diag or {}).errors or {})[1] and c.db.diag.errors[1].msg)) end
+local function sentMentions(needle)
+    for _, m in ipairs(H.sent) do if m.msg:find(needle, 1, true) then return true end end
+    return false
+end
+
+test("grudges: a camper is told apart from a drive-by when they turn up", function()
+    local a = H.newClient("Alice")
+    H.advance(20)
+    dieTo(a, "Driveby")
+    H.advance(40)
+    for _ = 1, 4 do dieTo(a, "Camper"); H.advance(120) end
+    local g = a.KOS:GrudgeOf("Camper")
+    eq(g.deaths, 4)
+    assert(g.camp and g.camp.n == 4 and g.camp.span == 360, "camped: 4 deaths in 6 minutes")
+    eq(a.KOS:GrudgeOf("Driveby").camp, nil)
+    eq(a.KOS:GrudgeShort(a.KOS:GrudgeOf("Driveby")), nil, "one kill is a drive-by")
+    revisit(a) -- the deaths themselves alerted (combat log); a fresh zone visit
+    local n = #a.raidWarnings
+    a.units.nameplate1 = { name = "Driveby", guid = "Player-1-0201", level = 60 }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(1)
+    a.units.nameplate2 = { name = "Camper", guid = "Player-1-0202", level = 60 }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.advance(1)
+    eq(#a.raidWarnings, n + 2)
+    local drive, camp = a.raidWarnings[n + 1], a.raidWarnings[n + 2]
+    assert(not drive:find("killed you", 1, true), drive)
+    assert(drive:find("Killed me in", 1, true), "the auto-mark note: " .. drive)
+    assert(camp:find("camped you 4x in 6 min", 1, true), camp)
+    assert(H.chatContains(a, "You and Camper: killed you 4x"), "the story in chat")
+    noErrors(a)
+end)
+
+test("grudges: hated players stand out, warn again, and stay flagged off the list; nothing is sent", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    a.KOS:SetHated("Escortganker", true)
+    eq(b.KOS:Hated("Escortganker"), nil, "just for me")
+    a.units.nameplate1 = { name = "Escortganker", guid = "Player-1-0301", level = 60 }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.advance(1)
+    eq(#a.raidWarnings, 1, "alerts though nobody has marked them")
+    assert(a.raidWarnings[1]:find("^HATED: Escortganker"), a.raidWarnings[1])
+    eq(a.KOS:Lookup("escortganker-forever"), nil, "not added to the guild list")
+    eq(a.KOS:Hated("Escortganker").guid, "Player-1-0301", "GUID learned, to catch a rename")
+    -- hanging around: no repeat; back after a few minutes unseen: warns again
+    H.advance(30); H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 1, "no repeat while they hang around")
+    H.advance(200); H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(#a.raidWarnings, 2, "warns again after a few minutes unseen")
+    eq(sentMentions("Escortganker"), false, "hating and sightings of an unlisted hated player send nothing")
+    -- on the list too (below my minimum alert level): the banner says so
+    b.KOS:Mark("Escortganker", "escort ganker"); H.advance(2)
+    revisit(a)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1"); H.advance(1)
+    eq(#a.raidWarnings, 3)
+    assert(a.raidWarnings[3]:find("(HATED) - escort ganker", 1, true), a.raidWarnings[3])
+    a.KOS:ShowUI("wanted")
+    -- quiet places: a chat line instead of a banner
+    a.KOS.S.quietResting = true; H.resting = true
+    revisit(a)
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate1"); H.advance(1)
+    eq(#a.raidWarnings, 3, "no banner while resting")
+    assert(H.chatContains(a, "who you hate, is nearby"))
+    H.resting = false
+    noErrors(a)
+    -- kept across a relog; unhating stops it
+    a = H.relogin(a)
+    assert(a.KOS:Hated("Escortganker"), "saved")
+    a.KOS:SetHated("Escortganker", false)
+    eq(a.KOS:Hated("Escortganker"), nil)
+end)
+
+test("forever: a picked killer turns into Hate them on the death prompt; unanswered deaths still count", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local function dieWith(name, guid)
+        a.units.nameplate4 = { name = name, guid = guid, level = 60, targeting = "player" }
+        H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate4")
+        H.fire(a, "PLAYER_REGEN_DISABLED")
+        H.advance(1)
+        H.fire(a, "PLAYER_DEAD")
+        H.advance(1.5)
+    end
+    dieWith("Camper", "Player-1-0401")
+    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "the only enemy on me goes in my own log before I answer")
+    eq(#b.KOS:GanksBy("camper-forever"), 0, "but nothing reaches the guild until I pick them")
+    local w = a.KOS.DeathPromptWidgets()
+    local btn = w.buttons[1]
+    btn.scripts.OnClick(btn)
+    eq(btn:GetText(), "Hate them")
+    H.advance(1)
+    eq(#b.KOS:GanksBy("camper-forever"), 1, "picking reports the gank")
+    btn.scripts.OnClick(btn)
+    assert(a.KOS:Hated("Camper"), "the second click hates them")
+    assert(btn:GetText():find("Hated", 1, true), btn:GetText())
+    eq(#b.KOS:GanksBy("camper-forever"), 1, "hating doesn't report the gank again")
+    eq(b.KOS:Hated("Camper"), nil, "just for me")
+    w.done.scripts.OnClick(w.done)
+    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "a picked death stays, and the guild's copy isn't counted twice")
+    -- ignored prompts still add up to a camp
+    H.advance(90); dieWith("Camper", "Player-1-0401")
+    H.advance(90); dieWith("Camper", "Player-1-0401")
+    local g = a.KOS:GrudgeOf("Camper")
+    eq(g.deaths, 3)
+    assert(g.camp and g.camp.n == 3, "camped, without answering the prompt")
+    -- None: it wasn't them after all
+    H.advance(90); dieWith("Camper", "Player-1-0401")
+    eq(a.KOS:GrudgeOf("Camper").deaths, 4)
+    w.done.scripts.OnClick(w.done)
+    eq(a.KOS:GrudgeOf("Camper").deaths, 3, "None drops the guess")
+    noErrors(a)
+end)
+
+test("grudges: what counts as a camp; /utu hate, unhate and grudges; damaged saved grudges are dropped", function()
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local W = a.KOS.WorstCamp
+    local function d(...)
+        local out = {}
+        for _, t in ipairs({ ... }) do out[#out + 1] = { t = t, v = "alice-forever" } end
+        return out
+    end
+    eq(W(d(0, 300)), nil, "two deaths isn't a camp")
+    eq(W(d(0, 700, 1400)), nil, "too far apart")
+    local c = W(d(0, 300, 600, 5000, 5100, 5200, 5300))
+    eq(c.n, 4, "the worst run")
+    eq(c.span, 300)
+    eq(W({ { t = 0, v = "a" }, { t = 100, v = "b" }, { t = 200, v = "a" } }), nil, "deaths of different characters")
+
+    a.units.target = { name = "Targetganker", guid = "Player-1-0501", level = 60 }
+    H.slash(a, "hate")
+    assert(a.KOS:Hated("Targetganker"), "/utu hate with no name hates my target")
+    eq(a.KOS:Hated("Targetganker").guid, "Player-1-0501")
+    H.slash(a, "hate Bob")
+    eq(a.KOS:Hated("Bob"), nil, "guildies can't be hated")
+    assert(H.chatContains(a, "is a guildie"))
+    H.slash(a, "grudges")
+    assert(H.chatContains(a, "Targetganker|r - |cffff2020hated"), "listed")
+    H.slash(a, "unhate Targetganker")
+    eq(a.KOS:Hated("Targetganker"), nil)
+    H.slash(a, "grudges")
+    assert(H.chatContains(a, "No grudges yet"))
+    eq(b.KOS:Hated("Targetganker"), nil)
+    noErrors(a)
+
+    local db = {
+        hated = { x = "bad", y = { n = "Gankdude", t = "soon" }, z = { n = "goodhater", t = 5, guid = 7 } },
+        myDeaths = {
+            q = { n = "Killer", d = { { t = 10, v = "erin-forever" }, "junk", { t = "x", v = "erin-forever" } } },
+            r = { n = "Empty", d = {} }, s = 7,
+        },
+    }
+    local e = H.newClient("Erin", { db = db })
+    H.advance(5)
+    assert(e.KOS:Hated("Goodhater"), "a good record is kept, re-keyed")
+    eq(e.KOS:Hated("Goodhater").guid, nil, "a bad GUID is dropped")
+    eq(e.KOS:Hated("Gankdude"), nil, "a bad record is dropped")
+    eq(e.KOS:GrudgeOf("Killer").deaths, 1, "bad death entries are dropped")
+    eq(e.db.myDeaths["empty-forever"], nil)
+    noErrors(e)
+end)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

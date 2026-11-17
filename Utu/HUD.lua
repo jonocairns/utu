@@ -329,10 +329,34 @@ end
 -- Death prompt: without a combat log we can't tell who landed the killing
 -- blow, so after you die we list the enemy players who were on you and
 -- you pick. Each pick records a gank for the guild and marks them; in a
--- group gank you can pick several.
+-- group gank you can pick several. A picked name turns into "Hate them":
+-- one more click for players who went over the line (just for you).
 ------------------------------------------------------------------------
 
 local deathPrompt
+
+local function hateLabel(b)
+    if KOS:Hated(b.cand.full) then
+        b:SetText("|cffff6060Hated|r - undo")
+    else
+        b:SetText("Hate them")
+    end
+end
+
+-- The answer for this death: guesses not picked are dropped. Done / None
+-- always answer; a prompt that times out answers only if something was picked.
+local function settleDeath(always)
+    local picked, any = {}, false
+    for _, b in ipairs(deathPrompt.buttons) do
+        if b.picked and b.cand then picked[KOS:Canonical(b.cand.full)] = true; any = true end
+    end
+    if always or any then KOS:SettleMyDeath(deathPrompt.at, picked) end
+end
+local function closeDeathPrompt()
+    settleDeath(true)
+    deathPrompt:Hide()
+end
+
 local function buildDeathPrompt()
     deathPrompt = makeToast("UtuDeath", -220)
     deathPrompt:SetSize(500, 64)
@@ -349,16 +373,19 @@ local function buildDeathPrompt()
         local fs = b.GetFontString and b:GetFontString()
         if fs then fs:SetWidth(108); fs:SetWordWrap(false) end -- long names stay inside the button
         b:SetScript("OnClick", function(self)
-            KOS:ConfirmKiller(self.cand, deathPrompt.at, deathPrompt.zone)
-            self:Disable()
-            self:SetText("Marked")
-            deathPrompt.done:SetText("Done")
-            deathPrompt.left = math.max(deathPrompt.left or 0, 30)
-            -- nobody left to pick: close
-            for _, other in ipairs(deathPrompt.buttons) do
-                if other:IsShown() and other:IsEnabled() then return end
+            local c = self.cand
+            if not c then return end
+            if self.picked then
+                KOS:SetHated(c.full, not KOS:Hated(c.full), c.guid)
+                hateLabel(self)
+                return
             end
-            deathPrompt:Hide()
+            KOS:ConfirmKiller(c, deathPrompt.at, deathPrompt.zone)
+            self.picked = true
+            hateLabel(self)
+            deathPrompt.done:SetText("Done")
+            -- stays up a little longer for "Hate them"; Done closes it
+            deathPrompt.left = math.max(deathPrompt.left or 0, 30)
         end)
         b:SetScript("OnEnter", function(self)
             local c = self.cand
@@ -367,8 +394,15 @@ local function buildDeathPrompt()
             GameTooltip:AddLine(KOS:Display(c.full))
             if c.level then GameTooltip:AddLine("Level " .. c.level, 1, 1, 1) end
             if c.T then GameTooltip:AddLine("Already on the list: " .. KOS:BountyTag(c.T), 1, 1, 1) end
+            local story = KOS:GrudgeText(KOS:GrudgeOf(c.full))
+            if story ~= "" then GameTooltip:AddLine("You: " .. story, 1, 0.5, 0.5, true) end
             if c.why then GameTooltip:AddLine("From the " .. c.why, 0.6, 0.6, 0.6) end
-            GameTooltip:AddLine("Records the gank for your guild" .. (KOS.S.autoMark and " and marks them." or "."), 0.6, 0.6, 0.6, true)
+            if self.picked then
+                GameTooltip:AddLine("Went over the line? Hated players stand out when they turn up. Only you see it.",
+                    0.6, 0.6, 0.6, true)
+            else
+                GameTooltip:AddLine("Records the gank for your guild" .. (KOS.S.autoMark and " and marks them." or "."), 0.6, 0.6, 0.6, true)
+            end
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -378,8 +412,9 @@ local function buildDeathPrompt()
     none:SetSize(70, 22)
     none:SetPoint("BOTTOMRIGHT", -8, 8)
     none:SetText("None")
-    none:SetScript("OnClick", function() deathPrompt:Hide() end)
+    none:SetScript("OnClick", closeDeathPrompt)
     deathPrompt.done = none
+    deathPrompt:HookScript("OnHide", function() settleDeath(false) end)
 end
 
 function KOS:ShowDeathPrompt(cands, at, zone)
@@ -388,7 +423,7 @@ function KOS:ShowDeathPrompt(cands, at, zone)
     deathPrompt.done:SetText("None")
     for i, b in ipairs(deathPrompt.buttons) do
         local c = cands[i]
-        b.cand = c
+        b.cand, b.picked = c, false
         b:Enable()
         if c then
             local label = self:Display(c.full)
@@ -401,6 +436,8 @@ function KOS:ShowDeathPrompt(cands, at, zone)
     end
     deathPrompt:Pop("|cffff6060Killed by enemy players?|r Pick everyone who was in on it:", 120)
 end
+
+function KOS.DeathPromptWidgets() return deathPrompt end -- for tests
 
 ------------------------------------------------------------------------
 -- Minimap button (drag around the rim; left = list, right = settings)
