@@ -5,7 +5,7 @@ ns.KOS.CHANGES = {
         "|cffffd100Grudges:|r Utu now remembers who killed you. When they turn up, the warning says how often (\"killed you 3x\"), and someone who killed you 3 or more times in a row, minutes apart, shows as |cffffd100camped you|r. Your own note shows before guildies' notes.",
         "|cffffd100Hate them:|r for a player who went over the line, pick them on the death prompt, then click their button again (|cffffd100Hate them|r). Or right-click them, or type /utu hate Name. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.",
         "|cffffd100Grudge list:|r /utu grudges lists everyone who has killed you, hated players first.",
-        "|cffffd100Death prompt:|r if Utu didn't see who was hitting you, it now lists the enemy players who were nearby so you can still pick your killer. If it saw nobody at all, /utu grudges says so.",
+        "|cffffd100Death prompt:|r now also offers a player who helped a mob kill you, or who hit you up to 30 seconds before you died. If Utu didn't see who was hitting you, it lists the enemy players who were nearby instead. If it saw nobody at all, /utu grudges says so.",
     } },
     { "0.9.0", {
         "|cffffd100Map pins:|r open the world map to see guildies' help calls (blue square) and where marked players were just spotted (skull). Hover a pin for who and how long ago. They fade over a few minutes and go when the player is killed. Turn them off with /utu set mapPins off.",

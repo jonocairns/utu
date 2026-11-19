@@ -509,29 +509,41 @@ local function readRecap()
     local first = events[1]
     if type(first) ~= "table" then return nil end
     local ts = KOS.Safe(first.timestamp)
-    return first, tostring(type(ts) == "number" and ts or "?") .. "/" .. #events
+    return events, tostring(type(ts) == "number" and ts or "?") .. "/" .. #events
 end
 local function primeRecap() -- whatever recap exists at login belongs to an earlier death
     local _, sig = readRecap()
     lastRecapSig = sig
 end
-local function recapKiller()
-    local first, sig = readRecap()
-    if not first or sig == lastRecapSig then return nil end
+-- The players in this death's recap: { name, guid, kb = landed the killing
+-- blow }, killing blow first. A player who hit me before a mob finished me
+-- off is still in there. nil if there's no new recap; n = events read.
+local function recapPlayers()
+    local events, sig = readRecap()
+    if not events or sig == lastRecapSig then return nil, 0 end
     lastRecapSig = sig
-    local guid, name = KOS.Safe(first.sourceGUID), KOS.Safe(first.sourceName)
-    if type(guid) ~= "string" or type(name) ~= "string" or not guid:find("^Player%-") then return nil end
-    if guid == KOS.Safe(UnitGUID("player")) then return nil end
-    return name, guid
+    local out, seen, me = {}, {}, KOS.Safe(UnitGUID("player"))
+    for i, e in ipairs(events) do
+        if type(e) == "table" then
+            local guid, name = KOS.Safe(e.sourceGUID), KOS.Safe(e.sourceName)
+            if type(guid) == "string" and type(name) == "string" and guid:find("^Player%-") and guid ~= me
+                and not seen[guid] then
+                seen[guid] = true
+                out[#out + 1] = { name = name, guid = guid, kb = i == 1 }
+            end
+        end
+        if i >= 20 then break end
+    end
+    return out, #events
 end
 
 local function inMyGroup(name)
     return (UnitInParty and UnitInParty(name)) or (UnitInRaid and UnitInRaid(name)) or false
 end
 
--- I died. Offer the players who were on me (and the death recap's killer)
+-- I died. Offer the players who were on me (and the death recap's players)
 -- so I can confirm who it was; that records the gank and marks them.
-local function offerKillers(at, zone, recent, nearby)
+local function offerKillers(at, zone, recent, nearby, diedAt)
     local cands, seen = {}, {}
     local function add(full, guid, level, class, why)
         local key = KOS:Canonical(full)
@@ -540,9 +552,16 @@ local function offerKillers(at, zone, recent, nearby)
         cands[#cands + 1] = { full = select(2, KOS:Canonical(full)), guid = guid, level = level or KOS:LevelOfGUID(guid),
             class = class, why = why, T = KOS:Lookup(key, guid) }
     end
-    local rName, rGUID = recapKiller()
-    if rName then add(rName, rGUID, nil, nil, "death recap") end
-    for _, a in ipairs(recent) do add(a.full, a.guid, a.level, a.class) end
+    local recap, recapEvents = recapPlayers()
+    local recapKB = recap and recap[1] and recap[1].kb
+    for _, r in ipairs(recap or {}) do add(r.name, r.guid, nil, nil, "death recap") end
+    -- seen on me lately; only one seen in the last few seconds is a safe guess
+    local fresh
+    for _, a in ipairs(recent) do
+        local n = #cands
+        add(a.full, a.guid, a.level, a.class)
+        if #cands > n and diedAt - a.at <= 10 then fresh = (fresh == nil) and cands[#cands] or false end
+    end
     local onMe = #cands
     -- nobody seen on me (no nameplates, never targeted them): offer the
     -- enemy players who were around instead, but never guess from them
@@ -553,14 +572,20 @@ local function offerKillers(at, zone, recent, nearby)
     if not KOS:InWorld() then why = "in an instance"
     elseif KOS:ListKey() == nil then why = "guild not loaded"
     elseif #cands == 0 then why = "no enemy players seen" end
-    KOS.lastDeathSeen = { t = at, onMe = onMe, nearby = #cands - onMe, recap = rName ~= nil, why = why }
+    KOS.lastDeathSeen = { t = at, onMe = onMe, nearby = #cands - onMe, why = why }
     KOS:Sample("death", string.format("on me %d, nearby %d, recap %s, %s", onMe, #cands - onMe,
-        rName and "yes" or (KOS.caps.deathRecap and "no" or "n/a"), why or "prompt shown"))
+        not KOS.caps.deathRecap and "n/a"
+            or string.format("%d events %d players%s", recapEvents, recap and #recap or 0, recapKB and " (killing blow)" or ""),
+        why or "prompt shown"))
     if why then return end
     while #cands > 3 do table.remove(cands) end
     -- my own grudge log counts the death even if the prompt goes unanswered,
-    -- when it's clear who it was: the only enemy on me, or the recap's killer
-    if (onMe == 1 and #cands == 1) or cands[1].why == "death recap" then KOS:NoteMyDeath(cands[1].full, at, true) end
+    -- when it's clear who it was: the recap's killing blow, or the only enemy
+    -- player around, seen on me in my last few seconds
+    local guess
+    if recapKB and cands[1].guid == recap[1].guid then guess = cands[1]
+    elseif #cands == 1 and fresh then guess = fresh end
+    if guess then KOS:NoteMyDeath(guess.full, at, true) end
     if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone, onMe == 0) end
 end
 
@@ -580,10 +605,12 @@ end
 -- the recap may fill in a moment after the death event
 local function onPlayerDeadNoLog()
     local at, zone = GetServerTime(), zoneString()
-    local recent = KOS:RecentAttackers(10)
-    local nearby = nearbyEnemies(20)
+    -- a player who softened me up for a mob may have stopped a while before
+    local recent = KOS:RecentAttackers(30)
+    local nearby = nearbyEnemies(30)
+    local diedAt = GetTime()
     wipe(attackers)
-    C_Timer.After(1, function() offerKillers(at, zone, recent, nearby) end)
+    C_Timer.After(1, function() offerKillers(at, zone, recent, nearby, diedAt) end)
 end
 
 -- I confirmed who killed me (from the death prompt).

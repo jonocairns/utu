@@ -2528,6 +2528,46 @@ test("forever: with nobody seen on me the prompt offers enemies who were nearby;
     noErrors(a)
 end)
 
+test("forever: a player who helped a mob kill me is still offered", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    local shown
+    local orig = a.KOS.ShowDeathPrompt
+    a.KOS.ShowDeathPrompt = function(self, cands, at, zone, nearbyOnly)
+        shown = { cands = cands, nearbyOnly = nearbyOnly }
+        orig(self, cands, at, zone, nearbyOnly)
+    end
+    -- the recap: a mob landed the killing blow, a Horde player hit me before
+    a.recap = {
+        { timestamp = 30, sourceName = "Raptor", sourceGUID = "Creature-0-1" },
+        { timestamp = 28, sourceName = "Helper", sourceGUID = "Player-1-0701" },
+        { timestamp = 27, sourceName = "Raptor", sourceGUID = "Creature-0-1" },
+    }
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    assert(shown and not shown.nearbyOnly, "prompt shown")
+    eq(shown.cands[1].full, "Helper-Forever")
+    eq(shown.cands[1].why, "death recap")
+    eq(a.KOS:GrudgeOf("Helper").deaths, 0, "the mob got the kill: not guessed")
+    assert(a.db.diag.samples.death[1].text:find("3 events 1 players", 1, true), a.db.diag.samples.death[1].text)
+    a.KOS.DeathPromptWidgets().done.scripts.OnClick(a.KOS.DeathPromptWidgets().done)
+    -- no recap: they were on me 20 seconds before the mob finished me
+    a.recap = nil
+    shown = nil
+    H.advance(60)
+    a.units.nameplate4 = { name = "Softener", guid = "Player-1-0702", level = 60, targeting = "player" }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate4")
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    H.advance(1)
+    a.units.nameplate4.targeting = nil
+    H.advance(20)
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    assert(shown and not shown.nearbyOnly, "offered")
+    eq(shown.cands[1].full, "Softener-Forever")
+    eq(a.KOS:GrudgeOf("Softener").deaths, 0, "not on me at the end: not guessed")
+    noErrors(a)
+end)
+
 test("grudges: what counts as a camp; /utu hate, unhate and grudges; damaged saved grudges are dropped", function()
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
