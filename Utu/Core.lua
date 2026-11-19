@@ -3051,6 +3051,12 @@ local function onSlash(msg)
         KOS:SetHated(name, cmd == "hate", guid)
     elseif cmd == "grudges" or cmd == "grudge" then
         local rows = KOS:GrudgeList()
+        local ld = KOS.lastDeathSeen
+        if ld and ld.why then
+            KOS:Print("Your last death (" .. KOS.Ago(ld.t) .. "): not logged, " .. (ld.why == "no enemy players seen"
+                and "Utu saw no enemy players around you. It only sees players you target, mouse over or have nameplates for."
+                or ld.why .. ".") .. " /utu hate Name still flags a player.")
+        end
         if #rows == 0 then
             KOS:Print("No grudges yet: nobody has killed you since Utu started keeping track. /utu hate Name flags a player.")
             return

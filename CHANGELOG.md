@@ -9,6 +9,7 @@ matches the version in `Utu/Utu.toc`.
 - **Grudges:** Utu now remembers who killed you. When they turn up, the warning says how often ("killed you 3x"), and someone who killed you 3 or more times in a row, minutes apart, shows as **camped you**. Your own note shows before guildies' notes.
 - **Hate them:** for a player who went over the line, pick them on the death prompt, then click their button again (**Hate them**). Or right-click them, or type `/utu hate Name`. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.
 - **Grudge list:** `/utu grudges` lists everyone who has killed you, hated players first.
+- **Death prompt:** if Utu didn't see who was hitting you, it now lists the enemy players who were nearby so you can still pick your killer. If it saw nobody at all, `/utu grudges` says so.
 
 ## 0.9.0
 - **Map pins:** open the world map to see guildies' help calls (blue square) and where marked players were just spotted (skull). Hover a pin for who and how long ago. They fade over a few minutes and go when the player is killed. Turn them off with `/utu set mapPins off`.

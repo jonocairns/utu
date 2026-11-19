@@ -27,6 +27,9 @@ KOS.ZoneString = zoneString
 -- Levels and GUIDs of players we've seen as units. The combat log and
 -- honour messages carry names only.
 local levelCache, nameGUID, cacheCount = {}, {}, 0
+-- Enemy players seen as units lately (any unit, not only ones on me):
+-- key -> { full, guid, level, class, at }. A fallback for the death prompt.
+local seenHostile, seenCount = {}, 0
 local function remember(info)
     if not info or not info.guid then return end
     local key = KOS:Canonical(info.full)
@@ -36,6 +39,15 @@ local function remember(info)
     end
     if key then nameGUID[key] = info.guid end
     if info.level then levelCache[info.guid] = info.level end
+    if key and info.hostile and key ~= KOS:MyKey() then
+        if not seenHostile[key] then
+            seenCount = seenCount + 1
+            if seenCount > 300 then wipe(seenHostile); seenCount = 1 end
+        end
+        local s = seenHostile[key] or {}
+        s.full, s.guid, s.level, s.class, s.at = info.full, info.guid, info.level, info.class, GetTime()
+        seenHostile[key] = s
+    end
 end
 function KOS:LevelOfGUID(guid) return guid and levelCache[guid] end
 function KOS:GUIDOfName(name)
@@ -519,7 +531,7 @@ end
 
 -- I died. Offer the players who were on me (and the death recap's killer)
 -- so I can confirm who it was; that records the gank and marks them.
-local function offerKillers(at, zone, recent)
+local function offerKillers(at, zone, recent, nearby)
     local cands, seen = {}, {}
     local function add(full, guid, level, class, why)
         local key = KOS:Canonical(full)
@@ -531,20 +543,47 @@ local function offerKillers(at, zone, recent)
     local rName, rGUID = recapKiller()
     if rName then add(rName, rGUID, nil, nil, "death recap") end
     for _, a in ipairs(recent) do add(a.full, a.guid, a.level, a.class) end
-    if #cands == 0 or not KOS:InWorld() or KOS:ListKey() == nil then return end
+    local onMe = #cands
+    -- nobody seen on me (no nameplates, never targeted them): offer the
+    -- enemy players who were around instead, but never guess from them
+    if onMe == 0 then
+        for _, a in ipairs(nearby) do add(a.full, a.guid, a.level, a.class, "nearby") end
+    end
+    local why
+    if not KOS:InWorld() then why = "in an instance"
+    elseif KOS:ListKey() == nil then why = "guild not loaded"
+    elseif #cands == 0 then why = "no enemy players seen" end
+    KOS.lastDeathSeen = { t = at, onMe = onMe, nearby = #cands - onMe, recap = rName ~= nil, why = why }
+    KOS:Sample("death", string.format("on me %d, nearby %d, recap %s, %s", onMe, #cands - onMe,
+        rName and "yes" or (KOS.caps.deathRecap and "no" or "n/a"), why or "prompt shown"))
+    if why then return end
     while #cands > 3 do table.remove(cands) end
     -- my own grudge log counts the death even if the prompt goes unanswered,
     -- when it's clear who it was: the only enemy on me, or the recap's killer
-    if #cands == 1 or cands[1].why == "death recap" then KOS:NoteMyDeath(cands[1].full, at, true) end
-    if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone) end
+    if (onMe == 1 and #cands == 1) or cands[1].why == "death recap" then KOS:NoteMyDeath(cands[1].full, at, true) end
+    if KOS.ShowDeathPrompt then KOS:ShowDeathPrompt(cands, at, zone, onMe == 0) end
+end
+
+-- Enemy players around me now (nameplates, target, focus) or seen as
+-- units in the last `window` seconds, newest first.
+local function nearbyEnemies(window)
+    for _, u in ipairs(SCAN_UNITS) do remember(KOS:UnitInfo(u)) end
+    for u in pairs(plates) do remember(KOS:UnitInfo(u)) end
+    local out, now = {}, GetTime()
+    for key, a in pairs(seenHostile) do
+        if now - a.at <= window then out[#out + 1] = a else seenHostile[key] = nil; seenCount = seenCount - 1 end
+    end
+    table.sort(out, function(x, y) return x.at > y.at end)
+    return out
 end
 
 -- the recap may fill in a moment after the death event
 local function onPlayerDeadNoLog()
     local at, zone = GetServerTime(), zoneString()
     local recent = KOS:RecentAttackers(10)
+    local nearby = nearbyEnemies(20)
     wipe(attackers)
-    C_Timer.After(1, function() offerKillers(at, zone, recent) end)
+    C_Timer.After(1, function() offerKillers(at, zone, recent, nearby) end)
 end
 
 -- I confirmed who killed me (from the death prompt).

@@ -396,7 +396,11 @@ local function buildDeathPrompt()
             if c.T then GameTooltip:AddLine("Already on the list: " .. KOS:BountyTag(c.T), 1, 1, 1) end
             local story = KOS:GrudgeText(KOS:GrudgeOf(c.full))
             if story ~= "" then GameTooltip:AddLine("You: " .. story, 1, 0.5, 0.5, true) end
-            if c.why then GameTooltip:AddLine("From the " .. c.why, 0.6, 0.6, 0.6) end
+            if c.why == "nearby" then
+                GameTooltip:AddLine("Seen nearby, but not seen hitting you", 0.6, 0.6, 0.6)
+            elseif c.why then
+                GameTooltip:AddLine("From the " .. c.why, 0.6, 0.6, 0.6)
+            end
             if self.picked then
                 GameTooltip:AddLine("Went over the line? Hated players stand out when they turn up. Only you see it.",
                     0.6, 0.6, 0.6, true)
@@ -417,7 +421,8 @@ local function buildDeathPrompt()
     deathPrompt:HookScript("OnHide", function() settleDeath(false) end)
 end
 
-function KOS:ShowDeathPrompt(cands, at, zone)
+-- nearbyOnly: nobody was seen hitting me; these are just enemies who were around
+function KOS:ShowDeathPrompt(cands, at, zone, nearbyOnly)
     if not deathPrompt then buildDeathPrompt() end
     deathPrompt.at, deathPrompt.zone = at, zone
     deathPrompt.done:SetText("None")
@@ -434,7 +439,8 @@ function KOS:ShowDeathPrompt(cands, at, zone)
             b:Hide()
         end
     end
-    deathPrompt:Pop("|cffff6060Killed by enemy players?|r Pick everyone who was in on it:", 120)
+    deathPrompt:Pop(nearbyOnly and "|cffff6060Killed by an enemy player?|r Utu didn't see who. These were nearby:"
+        or "|cffff6060Killed by enemy players?|r Pick everyone who was in on it:", 120)
 end
 
 function KOS.DeathPromptWidgets() return deathPrompt end -- for tests

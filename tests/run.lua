@@ -2478,6 +2478,56 @@ test("forever: a picked killer turns into Hate them on the death prompt; unanswe
     noErrors(a)
 end)
 
+test("forever: with nobody seen on me the prompt offers enemies who were nearby; no enemies at all says why", function()
+    H.forever = true
+    local a, b = H.newClient("Alice"), H.newClient("Bob")
+    H.advance(20)
+    local shown
+    local orig = a.KOS.ShowDeathPrompt
+    a.KOS.ShowDeathPrompt = function(self, cands, at, zone, nearbyOnly)
+        shown = { cands = cands, nearbyOnly = nearbyOnly }
+        orig(self, cands, at, zone, nearbyOnly)
+    end
+    -- no nameplates, nobody targeted: Utu sees no one
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    H.advance(1)
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    eq(shown, nil, "nothing to offer")
+    eq(a.KOS.lastDeathSeen.why, "no enemy players seen")
+    assert(a.db.diag.samples.death[1].text:find("on me 0, nearby 0", 1, true), a.db.diag.samples.death[1].text)
+    H.slash(a, "grudges")
+    assert(H.chatContains(a, "Utu saw no enemy players around you"), "/utu grudges says why the death wasn't logged")
+    -- moused over a rogue a few seconds before, never caught them targeting me
+    H.advance(60)
+    a.units.mouseover = { name = "Sneaky", guid = "Player-1-0601", level = 60 }
+    H.fire(a, "UPDATE_MOUSEOVER_UNIT")
+    a.units.mouseover = nil
+    a.units.nameplate7 = { name = "Passerby", guid = "Player-1-0602", level = 30 }
+    H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate7")
+    H.advance(5)
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    assert(shown and shown.nearbyOnly, "offered as nearby")
+    eq(#shown.cands, 2)
+    eq(shown.cands[1].why, "nearby")
+    eq(a.KOS:GrudgeOf("Sneaky").deaths, 0, "a nearby enemy is never guessed as the killer")
+    eq(a.KOS:GrudgeOf("Passerby").deaths, 0)
+    local w = a.KOS.DeathPromptWidgets()
+    for _, btn in ipairs(w.buttons) do
+        if btn.cand and btn.cand.full == "Sneaky-Forever" then btn.scripts.OnClick(btn) end
+    end
+    H.advance(1)
+    eq(a.KOS:GrudgeOf("Sneaky").deaths, 1, "picking them logs it")
+    eq(#b.KOS:GanksBy("sneaky-forever"), 1, "and reports the gank")
+    eq(a.KOS.lastDeathSeen.why, nil)
+    -- seen too long ago: not offered
+    shown = nil
+    H.fire(a, "NAME_PLATE_UNIT_REMOVED", "nameplate7"); a.units.nameplate7 = nil
+    H.advance(60)
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    eq(shown, nil, "enemies seen a minute ago aren't offered")
+    noErrors(a)
+end)
+
 test("grudges: what counts as a camp; /utu hate, unhate and grudges; damaged saved grudges are dropped", function()
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
