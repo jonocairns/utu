@@ -1162,8 +1162,8 @@ test("forever: the death recap's killer is offered first", function()
     a.KOS.ShowDeathPrompt = function(_, cands) shown = cands end
     -- entry 1 is the killing blow, as in Blizzard's recap window
     a.recap = {
-        { timestamp = 12, sourceName = "Recapper", sourceGUID = "Player-1-0021" },
-        { timestamp = 10, sourceName = "Earlier", sourceGUID = "Player-1-0020" },
+        { timestamp = 12, sourceName = "Recapper", sourceGUID = "Player-1-0021", event = "SWING_DAMAGE" },
+        { timestamp = 10, sourceName = "Earlier", sourceGUID = "Player-1-0020", event = "SPELL_DAMAGE" },
     }
     H.fire(a, "PLAYER_DEAD")
     eq(shown, nil, "waits a moment for the recap")
@@ -1177,9 +1177,9 @@ test("forever: the death recap's killer is offered first", function()
     eq(shown, nil, "a mob finishing you off isn't offered")
     -- a recap left over from before logging in isn't offered
     local b = H.newClient("Bob")
-    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030" } }
+    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030", event = "SWING_DAMAGE" } }
     b = H.relogin(b)
-    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030" } }
+    b.recap = { { timestamp = 5, sourceName = "Oldkiller", sourceGUID = "Player-1-0030", event = "SWING_DAMAGE" } }
     local bShown
     b.KOS.ShowDeathPrompt = function(_, cands) bShown = cands end
     H.fire(b, "PLAYER_LOGIN")
@@ -2450,42 +2450,105 @@ test("grudges: hated players stand out, warn again, and stay flagged off the lis
     eq(a.KOS:Hated("Escortganker"), nil)
 end)
 
-test("forever: the death prompt keeps the killer name and gives Hate its own button", function()
+local function clickDeath(widget)
+    widget.scripts.OnClick(widget)
+end
+
+test("forever: the collapsed death recap applies marks, one encounter note, and selected private Hate", function()
     H.forever = true
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
-    local function dieWith(name, guid)
-        a.units.nameplate4 = { name = name, guid = guid, level = 60, targeting = "player" }
-        H.fire(a, "NAME_PLATE_UNIT_ADDED", "nameplate4")
-        H.fire(a, "PLAYER_REGEN_DISABLED")
-        H.advance(1)
-        H.fire(a, "PLAYER_DEAD")
-        H.advance(1.5)
-    end
-    dieWith("Camper", "Player-1-0401")
-    eq(a.KOS:GrudgeOf("Camper").deaths, 0, "targeting me alone does not prove damage")
-    eq(#b.KOS:GanksBy("camper-forever"), 0, "but nothing reaches the guild until I pick them")
-    local w = a.KOS.DeathPromptWidgets()
-    local btn = w.buttons[1]
-    btn.scripts.OnClick(btn)
-    assert(btn:GetText():find("Camper", 1, true))
-    eq(btn.hate:GetText(), "Hate (private)")
-    H.advance(1)
-    eq(#b.KOS:GanksBy("camper-forever"), 1, "picking reports the gank")
-    btn.scripts.OnClick(btn)
-    eq(a.KOS:Hated("Camper"), nil, "clicking the name again does not hate them")
-    btn.hate.scripts.OnClick(btn.hate)
-    assert(a.KOS:Hated("Camper"), "the separate button hates them")
-    assert(btn.hate:GetText():find("Hated", 1, true))
-    eq(#b.KOS:GanksBy("camper-forever"), 1, "hating doesn't report the gank again")
-    eq(b.KOS:Hated("Camper"), nil, "just for me")
-    w.done.scripts.OnClick(w.done)
-    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "a picked death stays, and the guild's copy isn't counted twice")
-    H.advance(90); dieWith("Camper", "Player-1-0401")
-    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "unconfirmed guesses do not add deaths")
-    w.done.scripts.OnClick(w.done)
-    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "None leaves the log alone")
+    a.KOS.S.autoMark = false
+    a.recap = {
+        { timestamp = 110, sourceName = "Camper", sourceGUID = "Player-1-0401", event = "SWING_DAMAGE" },
+        { timestamp = 109, sourceName = "Sidekick", sourceGUID = "Player-1-0402", event = "SPELL_DAMAGE" },
+        { timestamp = 108, sourceName = "Healer", sourceGUID = "Player-1-0403", event = "SPELL_HEAL" },
+    }
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    local w, receipt = a.KOS.DeathPromptWidgets()
+    eq(w.apply:GetText(), "Mark all")
+    eq(w.scroll:IsShown(), false)
+    clickDeath(w.review)
+    eq(#w.rows, 2, "only players who damaged me")
+    assert(w.rows[1].details:GetText():find("Killing blow", 1, true))
+    w.rows[2].hate:SetChecked(true); clickDeath(w.rows[2].hate)
+    w.note:SetText("Camped the graveyard")
+    clickDeath(w.review); clickDeath(w.review)
+    eq(w.note:GetText(), "Camped the graveyard")
+    clickDeath(w.apply)
+    clickDeath(w.close)
+    assert(receipt:IsShown(), "pending choices are still reachable")
+    H.advance(4)
+    eq(#b.KOS:GanksBy("camper-forever"), 0, "no guild write during the undo window")
+    eq(a.KOS:Hated("Sidekick"), nil, "private write also waits")
+    H.advance(3)
+    assert(a.KOS:MyVote(T_(a, "Camper")), "explicit mark works with automatic marking off")
+    eq(#b.KOS:GanksBy("camper-forever"), 1)
+    eq(#b.KOS:GanksBy("sidekick-forever"), 1)
+    eq(b.KOS:GanksBy("camper-forever")[1].note, "Camped the graveyard")
+    eq(b.KOS:GanksBy("sidekick-forever")[1].note, nil, "one encounter note")
+    assert(a.KOS:Hated("Sidekick"))
+    eq(b.KOS:Hated("Sidekick"), nil)
+    eq(a.KOS:GrudgeOf("Camper").deaths, 1)
+    noErrors(a); noErrors(b)
+end)
+
+test("forever: a single attacker uses the same drawer, with per-player undo and undo after close", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.recap = { { timestamp = 10, sourceName = "Camper", sourceGUID = "Player-1-0401", event = "SWING_DAMAGE" } }
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    local w, receipt = a.KOS.DeathPromptWidgets()
+    eq(w.apply:GetText(), "Mark")
+    assert(w.text:GetText():find("Killed by Camper", 1, true))
+    clickDeath(w.review); clickDeath(w.apply)
+    H.advance(1); clickDeath(w.rows[1].undo)
+    H.advance(1); clickDeath(w.apply); clickDeath(w.skip)
+    H.advance(1); clickDeath(receipt.undo)
+    H.advance(7)
+    eq(#a.KOS:GanksBy("camper-forever"), 0)
+    eq(a.KOS:GrudgeOf("Camper").deaths, 0, "Skip drops the tentative death")
+    eq(a.KOS:MyVote(T_(a, "Camper")), nil)
     noErrors(a)
+end)
+
+test("forever: rank restriction offers reports and is checked before applying a pending mark", function()
+    H.forever = true
+    local a = H.newClient("Alice")
+    H.advance(20)
+    a.recap = { { timestamp = 12, sourceName = "Rankcheck", sourceGUID = "Player-1-0403", event = "SPELL_DAMAGE" } }
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    local w, receipt = a.KOS.DeathPromptWidgets()
+    clickDeath(w.apply)
+    a.KOS.CanMark = function() return false end
+    H.advance(6)
+    eq(a.KOS:MyVote(T_(a, "Rankcheck")), nil)
+    eq(#a.KOS:GanksBy("rankcheck-forever"), 0)
+    assert(receipt.text:GetText():find("Guild rank", 1, true))
+    a.recap[1].timestamp = 13
+    H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
+    eq(w.apply:GetText(), "Report")
+    clickDeath(w.apply); H.advance(6)
+    eq(a.KOS:MyVote(T_(a, "Rankcheck")), nil)
+    eq(#a.KOS:GanksBy("rankcheck-forever"), 1)
+    noErrors(a)
+end)
+
+test("encounter notes append to the death wire format and stay within the message limit", function()
+    local a = H.newClient("Alice")
+    local d = { victim = "Alice-Forever", killer = "Camper-Forever", t = math.floor(H.serverTime),
+        zone = string.rep("z", 60), note = string.rep("é", 60) }
+    local old = a.Sync.encodeItem("death", { victim = d.victim, killer = d.killer, t = d.t, zone = d.zone })
+    local msg = a.Sync.itemMsg("D", "death", d)
+    assert(#msg <= 255 and msg:sub(3, #old + 2) == old)
+    local _, decoded = a.Sync.decodeItem(msg:sub(3))
+    eq(decoded.note, string.rep("é", 30))
+    local _, older = a.Sync.decodeItem(old)
+    eq(older.note, "")
+    assert(a.KOS:MergeDeath(older))
+    assert(a.KOS:MergeDeath(decoded), "a later copy can fill in an encounter note")
+    eq(#a.KOS:GanksBy("camper-forever"), 1, "same death identity")
 end)
 
 test("forever: with nobody seen on me the prompt offers enemies who were nearby; no enemies at all says why", function()
@@ -2522,12 +2585,21 @@ test("forever: with nobody seen on me the prompt offers enemies who were nearby;
     eq(a.KOS:GrudgeOf("Sneaky").deaths, 0, "a nearby enemy is never guessed as the killer")
     eq(a.KOS:GrudgeOf("Passerby").deaths, 0)
     local w = a.KOS.DeathPromptWidgets()
-    for _, btn in ipairs(w.buttons) do
-        if btn.cand and btn.cand.full == "Sneaky-Forever" then btn.scripts.OnClick(btn) end
+    eq(w.scroll:IsShown(), false)
+    clickDeath(w.review)
+    local selected, manual
+    for _, row in ipairs(w.rows) do
+        if row.c.full == "Sneaky-Forever" then selected = row else manual = row end
     end
-    H.advance(1)
-    eq(a.KOS:GrudgeOf("Sneaky").deaths, 1, "picking them logs it")
-    eq(#b.KOS:GanksBy("sneaky-forever"), 1, "and reports the gank")
+    selected.hate:SetChecked(true); clickDeath(selected.hate)
+    assert(not w.note:IsShown(), "no encounter note for unverified or private actions")
+    clickDeath(w.apply); H.advance(6)
+    assert(a.KOS:Hated("Sneaky"))
+    eq(a.KOS:MyVote(T_(a, "Sneaky")), nil, "no guild mark")
+    clickDeath(manual.manual); H.advance(6)
+    assert(a.KOS:MyVote(T_(a, "Passerby")), "manual mark")
+    eq(a.KOS:GrudgeOf("Sneaky").deaths, 0)
+    eq(#b.KOS:GanksBy("passerby-forever"), 0, "manual mark does not report a gank")
     eq(a.KOS.lastDeathSeen.why, nil)
     -- seen too long ago: not offered
     shown = nil
@@ -2551,7 +2623,7 @@ test("forever: a player who helped a mob kill me is still offered", function()
     -- the recap: a mob landed the killing blow, a Horde player hit me before
     a.recap = {
         { timestamp = 30, sourceName = "Raptor", sourceGUID = "Creature-0-1" },
-        { timestamp = 28, sourceName = "Helper", sourceGUID = "Player-1-0701" },
+        { timestamp = 28, sourceName = "Helper", sourceGUID = "Player-1-0701", event = "SPELL_DAMAGE" },
         { timestamp = 27, sourceName = "Raptor", sourceGUID = "Creature-0-1" },
     }
     H.fire(a, "PLAYER_DEAD"); H.advance(1.5)
@@ -2560,7 +2632,7 @@ test("forever: a player who helped a mob kill me is still offered", function()
     eq(shown.cands[1].why, "death recap")
     eq(a.KOS:GrudgeOf("Helper").deaths, 0, "the mob got the kill: not guessed")
     assert(a.db.diag.samples.death[1].text:find("3 events 1 players", 1, true), a.db.diag.samples.death[1].text)
-    a.KOS.DeathPromptWidgets().done.scripts.OnClick(a.KOS.DeathPromptWidgets().done)
+    clickDeath(a.KOS.DeathPromptWidgets().skip)
     -- no recap: they were on me 20 seconds before the mob finished me
     a.recap = nil
     shown = nil

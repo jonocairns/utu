@@ -98,7 +98,9 @@ local function encodeItem(kind, a, b)
         local sig = KOS.CleanSig(a.sig)
         return sig and (s .. SEP .. sig) or s
     elseif kind == "death" then -- a = death
-        return join("d", a.victim, a.killer, tostring(a.t), a.zone or "")
+        local msg = join("d", a.victim, a.killer, tostring(a.t), a.zone or "")
+        local note = KOS.CleanText(a.note, math.min(KOS.ENCOUNTER_NOTE_MAX, math.max(0, MAX_MSG - #msg - 3)))
+        return note ~= "" and (msg .. SEP .. note) or msg
     elseif kind == "strike" then -- a = id, b = strike
         return join("x", a, b.by, tostring(b.t))
     elseif kind == "season" then
@@ -177,7 +179,8 @@ local function decodeItem(s)
         local _, killer = KOS:Canonical(f2)
         local t = stamp(f3)
         if not victim or not killer or not t then return nil end
-        return "death", { victim = victim, killer = killer, t = t, by = victim, zone = KOS.CleanText(f4, 60) }
+        return "death", { victim = victim, killer = killer, t = t, by = victim, zone = KOS.CleanText(f4, 60),
+            note = KOS.CleanText(f5, KOS.ENCOUNTER_NOTE_MAX) }
     elseif kind == "x" then
         local _, by = KOS:Canonical(f2)
         by = guildie(by)
@@ -559,7 +562,8 @@ local function announceLive(kind, it, who)
         KOS:Notify(KOS:InMyZone(it.zone) and "nearby" or "info",
             who .. " was killed by |cffff6060" .. KOS:Display(it.killer) .. "|r"
             .. (it.zone ~= "" and (" in " .. it.zone) or "")
-            .. (T and (" - now " .. KOS:BountyTag(T)) or "") .. " |cffff8000(revenge bonus for an hour)|r", true)
+            .. (T and (" - now " .. KOS:BountyTag(T)) or "") .. " |cffff8000(revenge bonus for an hour)|r"
+            .. (it.note and it.note ~= "" and (": " .. it.note) or ""), true)
     elseif kind == "clear" then
         KOS:Notify("info", who .. " pardoned " .. KOS:Display(it.target) .. ".", true)
     elseif kind == "kill" then

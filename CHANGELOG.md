@@ -5,6 +5,10 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.10.1
+- **Review attackers:** the death prompt starts folded with quick **Skip** and **Mark** actions. Open **Review** to choose who to mark or hate, or add one optional note for your guild. You have five seconds to undo before your choices apply.
+- **Nearby players:** if the death recap does not show who damaged you, Utu offers private Hate and individual manual marks. These choices leave the guild's death reports alone.
+
 ## 0.10.0
 - **Bounty claims:** Utu skips honour awards that don’t name the defeated player. Seeing a player die nearby isn’t enough to award bounty points.
 - **Grudges:** Utu now remembers who killed you. When they turn up, the warning says how often ("killed you 3x"), and someone who killed you 3 or more times in a row, minutes apart, shows as **camped you**. Your own note shows before guildies' notes.

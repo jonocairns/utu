@@ -1,6 +1,10 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.10.1", {
+        "|cffffd100Review attackers:|r the death prompt starts folded with quick |cffffd100Skip|r and |cffffd100Mark|r actions. Open |cffffd100Review|r to choose who to mark or hate, or add one optional note for your guild. You have five seconds to undo before your choices apply.",
+        "|cffffd100Nearby players:|r if the death recap does not show who damaged you, Utu offers private Hate and individual manual marks. These choices leave the guild's death reports alone.",
+    } },
     { "0.10.0", {
         "|cffffd100Bounty claims:|r Utu skips honour awards that don’t name the defeated player. Seeing a player die nearby isn’t enough to award bounty points.",
         "|cffffd100Grudges:|r Utu now remembers who killed you. When they turn up, the warning says how often (\"killed you 3x\"), and someone who killed you 3 or more times in a row, minutes apart, shows as |cffffd100camped you|r. Your own note shows before guildies' notes.",

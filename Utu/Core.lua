@@ -7,6 +7,7 @@ _G.Utu = KOS
 
 KOS.PREFIX = "KOS2"
 KOS.HOME_URL = "github.com/jonocairns/utu"
+KOS.ENCOUNTER_NOTE_MAX = 60
 KOS.NOTE_MAX = 100 -- bytes; keeps one mark inside a single 255-byte addon message
 KOS.DEFAULT_PARDON_RANK = 1 -- without a guild-info tag, GM (0) and rank 1 can pardon
 KOS.SKULL = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8" -- marks a player as kill on sight
@@ -1405,8 +1406,15 @@ function KOS:MergeDeath(d)
     local list = self:List()
     if list == EMPTY_LIST or d.t < self:DeathHorizon() then return false end
     local id = self.DeathId(d)
-    if list.deaths[id] then return false end
-    list.deaths[id] = { victim = d.victim, killer = d.killer, t = d.t, zone = d.zone }
+    local note = self.CleanText(d.note, self.ENCOUNTER_NOTE_MAX)
+    local old = list.deaths[id]
+    if old then
+        if note == "" or (old.note and old.note ~= "") then return false end
+        old.note = note
+        self:InvalidateGuildStats()
+        return true
+    end
+    list.deaths[id] = { victim = d.victim, killer = d.killer, t = d.t, zone = d.zone, note = note ~= "" and note or nil }
     self:InvalidateGuildStats()
     local key, full = self:Canonical(d.killer)
     local T = key and self:GetTarget(key, full, true)
@@ -1808,6 +1816,7 @@ function KOS:Mark(name, note, guid, class)
     end
     if self.MarkedInView then self:MarkedInView(key) end
     self:Changed()
+    return true
 end
 
 -- Remove *my* mark.
@@ -2124,15 +2133,18 @@ function KOS:InWorld()
 end
 
 -- at: server time of the death (defaults to now; set when confirmed later)
-function KOS:RecordDeath(killerFull, zone, at)
+function KOS:RecordDeath(killerFull, zone, at, note)
     local key, full = self:Canonical(killerFull)
     if not key or self:ListKey() == nil or not self:InWorld() then return end
     if lastDeath[key] and GetTime() - lastDeath[key] < 30 then return end
     lastDeath[key] = GetTime()
     local now = self:Now()
     local t = (at and at <= now and now - at < 600) and math.floor(at) or now
-    local d = { victim = self:MyName(), killer = full, t = t, zone = self.CleanText(zone or "", 60) }
-    if self:MergeDeath(d) and ns.Sync then ns.Sync:BroadcastDeath(d) end
+    local d = { victim = self:MyName(), killer = full, t = t, zone = self.CleanText(zone, 60),
+        note = self.CleanText(note, self.ENCOUNTER_NOTE_MAX) }
+    if not self:MergeDeath(d) then return end
+    if ns.Sync then ns.Sync:BroadcastDeath(d) end
+    return true
 end
 
 -- I got the killing blow on a KoS player (or a member of a KoS guild).
@@ -2790,14 +2802,14 @@ function KOS:NewSeason()
 end
 
 -- An enemy player killed me (open world): add my mark, or refresh it.
-function KOS:AutoMark(killerFull, guid, class, zone, levels)
-    if not self.S.autoMark or not self:InWorld() then return end
+function KOS:AutoMark(killerFull, guid, class, zone, levels, explicit)
+    if not (explicit or self.S.autoMark) or not self:InWorld() then return end
     local key, full = self:Canonical(killerFull)
     if not key or key == self:MyKey() then return end
     local T = self:GetTarget(key)
     local mine = self:MyVote(T)
     local note = mine and mine.note or ("Killed me in " .. (zone ~= "" and zone or "the world") .. (levels or ""))
-    self:Mark(full, note, guid, class)
+    if not self:Mark(full, note, guid, class) then return end
     -- if we know their guild from an earlier sighting, record it
     local g = self:GuildOfGUID(guid)
     T = self:GetTarget(key)
@@ -2806,6 +2818,7 @@ function KOS:AutoMark(killerFull, guid, class, zone, levels)
         if ns.Sync then ns.Sync:BroadcastGuild(T) end
         self:InvalidateGuildStats()
     end
+    return true
 end
 
 StaticPopupDialogs["UTU_SEASON"] = {

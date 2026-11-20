@@ -420,6 +420,9 @@ local function refreshWanted()
     lines[#lines + 1] = #ganks == 0 and "  |cff888888No ganks on record - marks only|r"
         or ("  Ganked " .. #ganks .. (#ganks == 1 and " guildie" or " guildies")
             .. " (last: " .. KOS:Display(ganks[#ganks].victim) .. ", " .. KOS.Ago(ganks[#ganks].t) .. ")")
+    local lastGank = ganks[#ganks]
+    local encounter = lastGank and KOS.CleanText(lastGank.note, KOS.ENCOUNTER_NOTE_MAX)
+    if encounter and encounter ~= "" then lines[#lines + 1] = "  Encounter: " .. encounter end
     lines[#lines + 1] = "  Killed by us " .. kills .. "x this season"
         .. (latest and (" (last: " .. KOS:Display(latest.by) .. ", " .. KOS.Ago(latest.t) .. ")") or "")
     local nem = KOS:NemesisOf(KOS:MyName())

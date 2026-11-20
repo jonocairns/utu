@@ -507,7 +507,7 @@ local function readRecap()
     local ok, events = pcall(C_DeathRecap.GetRecapEvents)
     if not ok or KOS.IsSecret(events) or type(events) ~= "table" then return nil end
     local first = events[1]
-    if type(first) ~= "table" then return nil end
+    if KOS.IsSecret(first) or type(first) ~= "table" then return nil end
     local ts = KOS.Safe(first.timestamp)
     return events, tostring(type(ts) == "number" and ts or "?") .. "/" .. #events
 end
@@ -524,7 +524,8 @@ local function recapPlayers()
     lastRecapSig = sig
     local out, seen, me = {}, {}, KOS.Safe(UnitGUID("player"))
     for i, e in ipairs(events) do
-        if type(e) == "table" then
+        local event = not KOS.IsSecret(e) and type(e) == "table" and KOS.Safe(e.event)
+        if type(event) == "string" and event:match("_DAMAGE$") then
             local guid, name = KOS.Safe(e.sourceGUID), KOS.Safe(e.sourceName)
             if type(guid) == "string" and type(name) == "string" and guid:find("^Player%-") and guid ~= me
                 and not seen[guid] then
@@ -543,26 +544,32 @@ end
 
 -- I died. Offer the players who were on me (and the death recap's players)
 -- so I can confirm who it was; that records the gank and marks them.
-local function offerKillers(at, zone, recent, nearby)
+local function offerKillers(at, zone, recent, nearby, diedAt)
     local cands, seen = {}, {}
-    local function add(full, guid, level, class, why)
+    local function add(full, guid, level, class, why, kb, seenAt)
         local key = KOS:Canonical(full)
         if not key or seen[key] or key == KOS:MyKey() or inMyGroup(KOS:Display(full)) then return end
         seen[key] = true
         cands[#cands + 1] = { full = select(2, KOS:Canonical(full)), guid = guid, level = level or KOS:LevelOfGUID(guid),
-            class = class, why = why, T = KOS:Lookup(key, guid) }
+            class = class, why = why, kb = kb, seenAgo = seenAt and math.max(0, math.floor(diedAt - seenAt)),
+            T = KOS:Lookup(key, guid) }
     end
     local recap, recapEvents = recapPlayers()
     local recapKB = recap and recap[1] and recap[1].kb
-    for _, r in ipairs(recap or {}) do add(r.name, r.guid, nil, nil, "death recap") end
+    local seenByGUID = {}
+    for _, a in ipairs(nearby) do seenByGUID[a.guid] = a end
+    for _, r in ipairs(recap or {}) do
+        local observed = seenByGUID[r.guid]
+        add(observed and observed.full or r.name, r.guid, nil, observed and observed.class, "death recap", r.kb)
+    end
     for _, a in ipairs(recent) do
-        add(a.full, a.guid, a.level, a.class)
+        add(a.full, a.guid, a.level, a.class, "targeting you", nil, a.at)
     end
     local onMe = #cands
     -- nobody seen on me (no nameplates, never targeted them): offer the
     -- enemy players who were around instead, but never guess from them
     if onMe == 0 then
-        for _, a in ipairs(nearby) do add(a.full, a.guid, a.level, a.class, "nearby") end
+        for _, a in ipairs(nearby) do add(a.full, a.guid, a.level, a.class, "nearby", nil, a.at) end
     end
     local why
     if not KOS:InWorld() then why = "in an instance"
@@ -574,7 +581,7 @@ local function offerKillers(at, zone, recent, nearby)
             or string.format("%d events %d players%s", recapEvents, recap and #recap or 0, recapKB and " (killing blow)" or ""),
         why or "prompt shown"))
     if why then return end
-    while #cands > 3 do table.remove(cands) end
+    while #cands > 20 do table.remove(cands) end
     if recapKB and cands[1].guid == recap[1].guid then
         KOS:NoteMyDeath(cands[1].full, at, true)
     end
@@ -600,8 +607,9 @@ local function onPlayerDeadNoLog()
     -- a player who softened me up for a mob may have stopped a while before
     local recent = KOS:RecentAttackers(30)
     local nearby = nearbyEnemies(30)
+    local diedAt = GetTime()
     wipe(attackers)
-    C_Timer.After(1, function() offerKillers(at, zone, recent, nearby) end)
+    C_Timer.After(1, function() offerKillers(at, zone, recent, nearby, diedAt) end)
 end
 
 -- I confirmed who killed me (from the death prompt).
