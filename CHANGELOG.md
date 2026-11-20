@@ -6,11 +6,11 @@ bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
 ## 0.10.0
-- **Bounties pay out again:** killing a marked player wasn't being counted, because Forever's honour message doesn't say who died. Utu now works out the kill from the enemy player who just died near you (your target or a nameplate), so you get the points.
+- **Bounty claims:** Utu skips honour awards that don’t name the defeated player. Seeing a player die nearby isn’t enough to award bounty points.
 - **Grudges:** Utu now remembers who killed you. When they turn up, the warning says how often ("killed you 3x"), and someone who killed you 3 or more times in a row, minutes apart, shows as **camped you**. Your own note shows before guildies' notes.
-- **Hate them:** for a player who went over the line, pick them on the death prompt, then click their button again (**Hate them**). Or right-click them, or type `/utu hate Name`. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.
+- **Hate them:** for a player who went over the line, confirm their name on the death prompt, then click the separate **Hate (private)** button under their name. Or right-click them, or type `/utu hate Name`. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.
 - **Grudge list:** `/utu grudges` lists everyone who has killed you, hated players first.
-- **Death prompt:** now also offers a player who helped a mob kill you, or who hit you up to 30 seconds before you died. If Utu didn't see who was hitting you, it lists the enemy players who were nearby instead. If it saw nobody at all, `/utu grudges` says so.
+- **Death prompt:** now also offers a player who helped a mob kill you, or who was targeting you up to 30 seconds before you died. If Utu has no recap or recent targeting information, it lists nearby enemies. Utu waits for your confirmation before counting a suspected attacker in your grudge history. If it saw nobody at all, `/utu grudges` says so.
 
 ## 0.9.0
 - **Map pins:** open the world map to see guildies' help calls (blue square) and where marked players were just spotted (skull). Hover a pin for who and how long ago. They fade over a few minutes and go when the player is killed. Turn them off with `/utu set mapPins off`.

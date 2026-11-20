@@ -329,8 +329,7 @@ end
 -- Death prompt: without a combat log we can't tell who landed the killing
 -- blow, so after you die we list the enemy players who were on you and
 -- you pick. Each pick records a gank for the guild and marks them; in a
--- group gank you can pick several. A picked name turns into "Hate them":
--- one more click for players who went over the line (just for you).
+-- group gank you can pick several. Each confirmed name has a separate personal Hate button.
 ------------------------------------------------------------------------
 
 local deathPrompt
@@ -339,7 +338,7 @@ local function hateLabel(b)
     if KOS:Hated(b.cand.full) then
         b:SetText("|cffff6060Hated|r - undo")
     else
-        b:SetText("Hate them")
+        b:SetText("Hate (private)")
     end
 end
 
@@ -359,32 +358,42 @@ end
 
 local function buildDeathPrompt()
     deathPrompt = makeToast("UtuDeath", -220)
-    deathPrompt:SetSize(500, 64)
+    deathPrompt:SetSize(500, 90)
     deathPrompt:EnableMouse(true)
     deathPrompt.icon:SetVertexColor(1, 0.3, 0.2)
     deathPrompt.text:ClearAllPoints()
-    deathPrompt.text:SetPoint("TOPLEFT", deathPrompt.icon, "TOPRIGHT", 8, 8)
+    deathPrompt.icon:ClearAllPoints()
+    deathPrompt.icon:SetPoint("TOPLEFT", 10, -10)
+    deathPrompt.text:SetPoint("TOPLEFT", deathPrompt.icon, "TOPRIGHT", 8, 0)
     deathPrompt.text:SetPoint("RIGHT", -10, 0)
     deathPrompt.buttons = {}
     for i = 1, 3 do
         local b = CreateFrame("Button", nil, deathPrompt, "UIPanelButtonTemplate")
         b:SetSize(116, 22)
-        b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 120, 8) -- third ends at 388; "None" starts at 422
+        b:SetPoint("BOTTOMLEFT", 36 + (i - 1) * 120, 34)
         local fs = b.GetFontString and b:GetFontString()
         if fs then fs:SetWidth(108); fs:SetWordWrap(false) end -- long names stay inside the button
+        local hate = CreateFrame("Button", nil, deathPrompt, "UIPanelButtonTemplate")
+        hate:SetSize(116, 22)
+        hate:SetPoint("TOP", b, "BOTTOM", 0, -4)
+        local hateText = hate.GetFontString and hate:GetFontString()
+        if hateText then hateText:SetWidth(108); hateText:SetWordWrap(false) end
+        hate:SetScript("OnClick", function(self)
+            local c = self.cand
+            if not c or not b.picked then return end
+            KOS:SetHated(c.full, not KOS:Hated(c.full), c.guid)
+            hateLabel(self)
+        end)
+        b.hate = hate
         b:SetScript("OnClick", function(self)
             local c = self.cand
-            if not c then return end
-            if self.picked then
-                KOS:SetHated(c.full, not KOS:Hated(c.full), c.guid)
-                hateLabel(self)
-                return
-            end
+            if not c or self.picked then return end
             KOS:ConfirmKiller(c, deathPrompt.at, deathPrompt.zone)
             self.picked = true
-            hateLabel(self)
+            self:Disable()
+            hateLabel(hate)
+            hate:Show()
             deathPrompt.done:SetText("Done")
-            -- stays up a little longer for "Hate them"; Done closes it
             deathPrompt.left = math.max(deathPrompt.left or 0, 30)
         end)
         b:SetScript("OnEnter", function(self)
@@ -397,16 +406,11 @@ local function buildDeathPrompt()
             local story = KOS:GrudgeText(KOS:GrudgeOf(c.full))
             if story ~= "" then GameTooltip:AddLine("You: " .. story, 1, 0.5, 0.5, true) end
             if c.why == "nearby" then
-                GameTooltip:AddLine("Seen nearby, but not seen hitting you", 0.6, 0.6, 0.6)
+                GameTooltip:AddLine("Seen nearby before you died", 0.6, 0.6, 0.6)
             elseif c.why then
                 GameTooltip:AddLine("From the " .. c.why, 0.6, 0.6, 0.6)
             end
-            if self.picked then
-                GameTooltip:AddLine("Went over the line? Hated players stand out when they turn up. Only you see it.",
-                    0.6, 0.6, 0.6, true)
-            else
-                GameTooltip:AddLine("Records the gank for your guild" .. (KOS.S.autoMark and " and marks them." or "."), 0.6, 0.6, 0.6, true)
-            end
+            GameTooltip:AddLine("Records the gank for your guild" .. (KOS.S.autoMark and " and marks them." or "."), 0.6, 0.6, 0.6, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -429,6 +433,8 @@ function KOS:ShowDeathPrompt(cands, at, zone, nearbyOnly)
     for i, b in ipairs(deathPrompt.buttons) do
         local c = cands[i]
         b.cand, b.picked = c, false
+        b.hate.cand = c
+        b.hate:Hide()
         b:Enable()
         if c then
             local label = self:Display(c.full)
@@ -439,7 +445,7 @@ function KOS:ShowDeathPrompt(cands, at, zone, nearbyOnly)
             b:Hide()
         end
     end
-    deathPrompt:Pop(nearbyOnly and "|cffff6060Killed by an enemy player?|r Utu didn't see who. These were nearby:"
+    deathPrompt:Pop(nearbyOnly and "|cffff6060Killed by an enemy player?|r These players were nearby:"
         or "|cffff6060Killed by enemy players?|r Pick everyone who was in on it:", 120)
 end
 

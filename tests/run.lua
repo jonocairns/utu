@@ -1114,49 +1114,18 @@ test("forever: honour kills pay every credited guildie; the bounty drains once",
     eq(#a.KOS:Claims("Alice"), 1, "unmarked players pay nothing")
 end)
 
-test("forever: an honour award without a name pays for the marked player who just died near me", function()
+test("forever: nearby deaths cannot identify a nameless honour award", function()
     H.forever = true
-    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    local a = H.newClient("Alice")
     H.advance(20)
-    c.KOS:Mark("Gankdude", "")
-    H.advance(2)
-    local AWARD = "You have been awarded 3 Honor."
-    -- a corpse I only ever saw dead isn't my kill
-    a.units.target = { name = "Gankdude", guid = "Player-1-0801", level = 60, dead = true }
+    a.KOS:Mark("Gankdude", "")
+    a.units.target = { name = "Gankdude", guid = "Player-1-0801", level = 60 }
     H.fire(a, "PLAYER_TARGET_CHANGED")
-    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
-    H.advance(1)
-    eq(#a.KOS:Claims("Alice"), 0, "old corpse")
-    assert(a.db.diag.samples.honorKill[1].text:find("no enemy player seen dying", 1, true))
-    -- fight them: alive on my target, then dead, then the honour arrives
-    H.advance(120)
-    a.units.target.dead = false
-    H.fire(a, "PLAYER_TARGET_CHANGED")
-    H.fire(a, "PLAYER_REGEN_DISABLED")
-    H.advance(3)
     a.units.target.dead = true
     H.fire(a, "UNIT_HEALTH", "target")
-    H.advance(0.5)
-    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
-    H.advance(2)
-    eq(#a.KOS:Claims("Alice"), 1, "claimed")
-    assert(points(c, "Alice") > 0, "and Carol sees Alice's points")
-    assert(H.chatContains(a, "Bounty claimed on Gankdude"), "told")
-    -- one death pays one honour award
-    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
-    H.advance(1)
-    eq(#a.KOS:Claims("Alice"), 1, "the same death isn't claimed twice")
-    -- killed by a nameplate I wasn't targeting: the plate goes when they die
-    b.units.nameplate3 = { name = "Gankdude", guid = "Player-1-0801", level = 60 }
-    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate3")
-    H.advance(2)
-    b.units.nameplate3.dead = true
-    H.fire(b, "NAME_PLATE_UNIT_REMOVED", "nameplate3")
-    b.units.nameplate3 = nil
-    H.fire(b, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
-    H.advance(2)
-    eq(#b.KOS:Claims("Bob"), 1, "an assist from a nameplate counts too")
-    eq(#a.db.diag.errors + #b.db.diag.errors, 0, "no handler errors")
+    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", "You have been awarded 3 Honor.")
+    eq(#a.KOS:Claims("Alice"), 0, "seeing the target die does not identify the victim")
+    eq(a.db.diag.samples.honorKill[1].text, "honour award did not identify a victim")
 end)
 
 test("forever: who killed me comes from a prompt; confirming records the gank and marks", function()
@@ -2481,7 +2450,7 @@ test("grudges: hated players stand out, warn again, and stay flagged off the lis
     eq(a.KOS:Hated("Escortganker"), nil)
 end)
 
-test("forever: a picked killer turns into Hate them on the death prompt; unanswered deaths still count", function()
+test("forever: the death prompt keeps the killer name and gives Hate its own button", function()
     H.forever = true
     local a, b = H.newClient("Alice"), H.newClient("Bob")
     H.advance(20)
@@ -2494,32 +2463,28 @@ test("forever: a picked killer turns into Hate them on the death prompt; unanswe
         H.advance(1.5)
     end
     dieWith("Camper", "Player-1-0401")
-    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "the only enemy on me goes in my own log before I answer")
+    eq(a.KOS:GrudgeOf("Camper").deaths, 0, "targeting me alone does not prove damage")
     eq(#b.KOS:GanksBy("camper-forever"), 0, "but nothing reaches the guild until I pick them")
     local w = a.KOS.DeathPromptWidgets()
     local btn = w.buttons[1]
     btn.scripts.OnClick(btn)
-    eq(btn:GetText(), "Hate them")
+    assert(btn:GetText():find("Camper", 1, true))
+    eq(btn.hate:GetText(), "Hate (private)")
     H.advance(1)
     eq(#b.KOS:GanksBy("camper-forever"), 1, "picking reports the gank")
     btn.scripts.OnClick(btn)
-    assert(a.KOS:Hated("Camper"), "the second click hates them")
-    assert(btn:GetText():find("Hated", 1, true), btn:GetText())
+    eq(a.KOS:Hated("Camper"), nil, "clicking the name again does not hate them")
+    btn.hate.scripts.OnClick(btn.hate)
+    assert(a.KOS:Hated("Camper"), "the separate button hates them")
+    assert(btn.hate:GetText():find("Hated", 1, true))
     eq(#b.KOS:GanksBy("camper-forever"), 1, "hating doesn't report the gank again")
     eq(b.KOS:Hated("Camper"), nil, "just for me")
     w.done.scripts.OnClick(w.done)
     eq(a.KOS:GrudgeOf("Camper").deaths, 1, "a picked death stays, and the guild's copy isn't counted twice")
-    -- ignored prompts still add up to a camp
     H.advance(90); dieWith("Camper", "Player-1-0401")
-    H.advance(90); dieWith("Camper", "Player-1-0401")
-    local g = a.KOS:GrudgeOf("Camper")
-    eq(g.deaths, 3)
-    assert(g.camp and g.camp.n == 3, "camped, without answering the prompt")
-    -- None: it wasn't them after all
-    H.advance(90); dieWith("Camper", "Player-1-0401")
-    eq(a.KOS:GrudgeOf("Camper").deaths, 4)
+    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "unconfirmed guesses do not add deaths")
     w.done.scripts.OnClick(w.done)
-    eq(a.KOS:GrudgeOf("Camper").deaths, 3, "None drops the guess")
+    eq(a.KOS:GrudgeOf("Camper").deaths, 1, "None leaves the log alone")
     noErrors(a)
 end)
 
