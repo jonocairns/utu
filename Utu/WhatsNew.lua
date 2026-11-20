@@ -2,6 +2,7 @@
 local _, ns = ...
 ns.KOS.CHANGES = {
     { "0.10.0", {
+        "|cffffd100Bounties pay out again:|r killing a marked player wasn't being counted, because Forever's honour message doesn't say who died. Utu now works out the kill from the enemy player who just died near you (your target or a nameplate), so you get the points.",
         "|cffffd100Grudges:|r Utu now remembers who killed you. When they turn up, the warning says how often (\"killed you 3x\"), and someone who killed you 3 or more times in a row, minutes apart, shows as |cffffd100camped you|r. Your own note shows before guildies' notes.",
         "|cffffd100Hate them:|r for a player who went over the line, pick them on the death prompt, then click their button again (|cffffd100Hate them|r). Or right-click them, or type /utu hate Name. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.",
         "|cffffd100Grudge list:|r /utu grudges lists everyone who has killed you, hated players first.",

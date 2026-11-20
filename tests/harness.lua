@@ -334,6 +334,11 @@ function H.newClient(name, opts)
         if u then return u.faction or "Horde" end
     end
     env.UnitHealth = function(unit) if unit == "player" then return c.health or 100 end end
+    env.UnitIsDeadOrGhost = function(unit)
+        if unit == "player" then return c.dead or false end
+        local u = c.units[unit]
+        if u then return u.dead or false end
+    end
     env.GetBuildInfo = function() return "1.60.1", "70862", "Nov 1 2026", 16001 end
     env.GetAddOnMetadata = function(_, field) if field == "Version" then return c.version or "9.9.9" end end
     env.UnitLevel = function(unit)

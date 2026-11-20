@@ -433,6 +433,37 @@ local lastDamaged = -100 -- GetTime() I last lost health
 local lastHealth
 local SCAN_UNITS = { "target", "focus", "mouseover" }
 
+-- Forever's honour message doesn't name the victim ("You have been awarded
+-- 3 Honor."), so the kill is the enemy player who just died near me. Watch
+-- enemy players' units: seen alive, then dead = a death I might be credited for.
+local aliveAt, aliveCount = {}, 0 -- player GUID -> GetTime() last seen alive
+local justDied = {}               -- player GUID -> { full, guid, level, at, used }
+local function watchEnemy(unit)
+    if not KOS.Try(UnitIsPlayer, unit) then return end
+    local guid = KOS.Try(UnitGUID, unit)
+    if type(guid) ~= "string" or guid == KOS.Safe(UnitGUID("player")) then return end
+    local dead = KOS.Try(UnitIsDeadOrGhost, unit)
+    if dead == nil then return end
+    local now = GetTime()
+    if not dead then
+        if not aliveAt[guid] then
+            aliveCount = aliveCount + 1
+            if aliveCount > 500 then wipe(aliveAt); aliveCount = 1 end
+        end
+        aliveAt[guid] = now
+        return
+    end
+    -- dead: only a death I saw happen (alive moments ago), not an old corpse
+    local wasAlive = aliveAt[guid]
+    if not wasAlive or now - wasAlive > 30 then return end
+    aliveAt[guid] = nil
+    aliveCount = aliveCount - 1
+    local info = KOS:UnitInfo(unit)
+    if not info or info.hostile == false then return end
+    remember(info)
+    justDied[guid] = { full = info.full, guid = guid, level = info.level, at = now }
+end
+
 local function noteAttacker(u)
     if not KOS:IsTargetingMe(u) then return nil end -- cheap check first
     local info = KOS:UnitInfo(u)
@@ -452,10 +483,12 @@ local function scanAttackers()
     if not KOS:InWorld() then return end
     local found = {}
     for _, u in ipairs(SCAN_UNITS) do
+        watchEnemy(u)
         local key, a = noteAttacker(u)
         if key then found[key] = a end
     end
     for u in pairs(plates) do
+        watchEnemy(u)
         local key, a = noteAttacker(u)
         if key then found[key] = a end
     end
@@ -680,14 +713,35 @@ end
 KOS.HonorPatternFrom = patternFrom -- for tests
 KOS.HonorVictim = honorVictim -- for tests
 
+-- The enemy player whose death this honour is for: the earliest one that
+-- died in the last few seconds and hasn't been used for another honour.
+local function honorKillVictim()
+    for _, u in ipairs(SCAN_UNITS) do watchEnemy(u) end
+    for u in pairs(plates) do watchEnemy(u) end
+    local best, now = nil, GetTime()
+    for guid, d in pairs(justDied) do
+        if now - d.at > 60 then justDied[guid] = nil
+        elseif not d.used and now - d.at <= 10 and (not best or d.at < best.at) then best = d end
+    end
+    if best then best.used = true end
+    return best
+end
+
 local function onHonorGain(msg)
     if KOS.IsSecret(msg) or type(msg) ~= "string" then return end
     KOS:Sample("honor", msg)
     if KOS.caps.combatLog then return end -- the combat log already gives us killing blows
-    local name = honorVictim(msg)
+    local name, guid = honorVictim(msg), nil
+    if not name then
+        local d = honorKillVictim()
+        KOS:Sample("honorKill", d and ("matched " .. d.full .. string.format(" (died %.1fs before)", GetTime() - d.at))
+            or "no enemy player seen dying")
+        if not d then return end
+        name, guid = d.full, d.guid
+    end
     local key, full = KOS:Canonical(name)
     if not key or key == KOS:MyKey() then return end
-    local guid = KOS:GUIDOfName(full)
+    guid = guid or KOS:GUIDOfName(full)
     local T = claimTarget(full, guid)
     if T then
         KOS:ClaimKill(T, zoneString(), KOS:LevelOfGUID(guid))
@@ -845,12 +899,14 @@ local function plateAdded(unit, retry)
         return
     end
     remember(info) -- any player: needed for "bully" help calls
+    if not KOS.caps.combatLog then watchEnemy(unit) end
     if KOS:UpdatePlate(unit) then KOS:CheckUnit(unit, "nameplate", KOS.S.srcNameplate) end
 end
 
 KOS:On("NAME_PLATE_UNIT_ADDED", function(unit) plateAdded(unit) end)
 
 KOS:On("NAME_PLATE_UNIT_REMOVED", function(unit)
+    if plates[unit] and not KOS.caps.combatLog then watchEnemy(unit) end
     local plate = plates[unit]
     plates[unit] = nil
     local m = plate and marks[plate]
@@ -858,6 +914,7 @@ KOS:On("NAME_PLATE_UNIT_REMOVED", function(unit)
 end)
 
 KOS:On("PLAYER_TARGET_CHANGED", function()
+    if not KOS.caps.combatLog then watchEnemy("target") end
     KOS:CheckUnit("target", "target", KOS.S.srcTarget)
     if KOS.RefreshTargetBadge then KOS:RefreshTargetBadge() end
 end)
@@ -877,7 +934,11 @@ KOS:On("UNIT_COMBAT", function(unit, action)
     if unit == "player" and action == "WOUND" then onDamaged() end
 end)
 KOS:On("UNIT_HEALTH", function(unit)
-    if KOS.IsSecret(unit) or unit ~= "player" then return end
+    if KOS.IsSecret(unit) then return end
+    if unit ~= "player" then
+        if unit == "target" or unit == "focus" or plates[unit] then watchEnemy(unit) end
+        return
+    end
     local h = KOS.Try(UnitHealth, "player")
     if type(h) ~= "number" then return end
     if lastHealth and h < lastHealth then onDamaged() end

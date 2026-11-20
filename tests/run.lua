@@ -1114,6 +1114,51 @@ test("forever: honour kills pay every credited guildie; the bounty drains once",
     eq(#a.KOS:Claims("Alice"), 1, "unmarked players pay nothing")
 end)
 
+test("forever: an honour award without a name pays for the marked player who just died near me", function()
+    H.forever = true
+    local a, b, c = H.newClient("Alice"), H.newClient("Bob"), H.newClient("Carol")
+    H.advance(20)
+    c.KOS:Mark("Gankdude", "")
+    H.advance(2)
+    local AWARD = "You have been awarded 3 Honor."
+    -- a corpse I only ever saw dead isn't my kill
+    a.units.target = { name = "Gankdude", guid = "Player-1-0801", level = 60, dead = true }
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
+    H.advance(1)
+    eq(#a.KOS:Claims("Alice"), 0, "old corpse")
+    assert(a.db.diag.samples.honorKill[1].text:find("no enemy player seen dying", 1, true))
+    -- fight them: alive on my target, then dead, then the honour arrives
+    H.advance(120)
+    a.units.target.dead = false
+    H.fire(a, "PLAYER_TARGET_CHANGED")
+    H.fire(a, "PLAYER_REGEN_DISABLED")
+    H.advance(3)
+    a.units.target.dead = true
+    H.fire(a, "UNIT_HEALTH", "target")
+    H.advance(0.5)
+    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
+    H.advance(2)
+    eq(#a.KOS:Claims("Alice"), 1, "claimed")
+    assert(points(c, "Alice") > 0, "and Carol sees Alice's points")
+    assert(H.chatContains(a, "Bounty claimed on Gankdude"), "told")
+    -- one death pays one honour award
+    H.fire(a, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
+    H.advance(1)
+    eq(#a.KOS:Claims("Alice"), 1, "the same death isn't claimed twice")
+    -- killed by a nameplate I wasn't targeting: the plate goes when they die
+    b.units.nameplate3 = { name = "Gankdude", guid = "Player-1-0801", level = 60 }
+    H.fire(b, "NAME_PLATE_UNIT_ADDED", "nameplate3")
+    H.advance(2)
+    b.units.nameplate3.dead = true
+    H.fire(b, "NAME_PLATE_UNIT_REMOVED", "nameplate3")
+    b.units.nameplate3 = nil
+    H.fire(b, "CHAT_MSG_COMBAT_HONOR_GAIN", AWARD)
+    H.advance(2)
+    eq(#b.KOS:Claims("Bob"), 1, "an assist from a nameplate counts too")
+    eq(#a.db.diag.errors + #b.db.diag.errors, 0, "no handler errors")
+end)
+
 test("forever: who killed me comes from a prompt; confirming records the gank and marks", function()
     H.forever = true
     local a, b = H.newClient("Alice"), H.newClient("Bob")

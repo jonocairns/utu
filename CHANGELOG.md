@@ -6,6 +6,7 @@ bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
 ## 0.10.0
+- **Bounties pay out again:** killing a marked player wasn't being counted, because Forever's honour message doesn't say who died. Utu now works out the kill from the enemy player who just died near you (your target or a nameplate), so you get the points.
 - **Grudges:** Utu now remembers who killed you. When they turn up, the warning says how often ("killed you 3x"), and someone who killed you 3 or more times in a row, minutes apart, shows as **camped you**. Your own note shows before guildies' notes.
 - **Hate them:** for a player who went over the line, pick them on the death prompt, then click their button again (**Hate them**). Or right-click them, or type `/utu hate Name`. Hated players get a red warning and a screen flash, warn again each time they come back, and stay flagged even after they drop off the list. Only you see it, and bounties and points don't change.
 - **Grudge list:** `/utu grudges` lists everyone who has killed you, hated players first.
