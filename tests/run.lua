@@ -1706,7 +1706,7 @@ test("forgery check: items in my name that I never made are flagged, not rejecte
     local now = math.floor(H.serverTime)
     local function dump(c, item) H.fire(c, "CHAT_MSG_ADDON", K.PREFIX, "D\t" .. item, "GUILD", "Bob-Forever") end
     local function flagged(c, needle)
-        for _, l in ipairs(c.chat) do if l:find("Possible forgery", 1, true) and (not needle or l:find(needle, 1, true)) then return true end end
+        for _, l in ipairs(c.chat) do if l:find("Unverified sync", 1, true) and (not needle or l:find(needle, 1, true)) then return true end end
         return false
     end
     local function flags(c) return #c.KOS:Ledger().flags end
@@ -2491,6 +2491,25 @@ test("forever: a blank realm restores the saved guild list and merges the split 
     a.KOS:InitDB()
     eq(#a.KOS:GanksBy(restored), 1, "idempotent")
     noErrors(a)
+end)
+
+test("forever: recovered guild marks keep their authorship after the blank list was already merged", function()
+    H.forever = true
+    local key = H.guild.name .. "-Forever"
+    local target = "example-forever"
+    local now = math.floor(H.serverTime)
+    local record = { n = "Example-Forever", t = now, note = "Graveyard" }
+    local a = H.newClient("Alice", { db = { lists = { [key] = {} }, authored = {
+        ["alice-"] = { [key] = { since = now - 5, votes = { [target] = record } } },
+        ["alice-forever"] = { [key] = { since = now - 1, votes = {} } },
+    } } })
+    local L = a.KOS:Ledger()
+    eq(L.votes[target], record)
+    a.KOS:AuditVote({ key = target, target = record.n, by = "Alice-Forever", t = now, note = record.note }, "Bob-Forever")
+    eq(#L.flags, 0, "known mark does not warn")
+    a.KOS:AuditVote({ key = target, target = record.n, by = "Alice-Forever", t = now + 1, note = "Unknown" }, "Bob-Forever")
+    eq(#L.flags, 1, "unknown revision still warns")
+    assert(H.chatContains(a, "Unverified sync"))
 end)
 
 test("forever: an unknown or ambiguous realm never selects a blank guild list", function()

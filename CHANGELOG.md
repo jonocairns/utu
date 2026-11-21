@@ -5,6 +5,9 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.10.3
+- **Clearer sync warnings:** Utu reconnects marks and claims to your own authorship records after recovering a split guild list. Warnings now describe unverified sync data.
+
 ## 0.10.2
 - **Restore missing Wanted entries:** if Forever left the realm blank and Utu started a second list for your guild, Utu rejoins it with your existing list when the realm is clear.
 

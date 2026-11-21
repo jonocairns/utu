@@ -1282,7 +1282,7 @@ function KOS:FlagForgery(L, sig, entry, text)
     warnTimes[#warnTimes + 1] = now
     local more = warnSuppressed > 0 and (" (" .. warnSuppressed .. " more flagged; see /utu sync)") or ""
     warnSuppressed = 0
-    self:Notify("me", "|cffff8040Possible forgery:|r " .. text .. more)
+    self:Notify("me", "|cffff8040Unverified sync:|r " .. text .. more)
 end
 
 -- A synced mark (or removal) in my name, checked before it's merged.
@@ -1467,6 +1467,40 @@ function KOS:MergeDeath(d)
     return true
 end
 
+local function mergeAuthorship(current, old)
+    if not current then return old end
+    current.since = math.min(current.since, old.since)
+    for key, v in pairs(old.votes) do
+        if not current.votes[key] or current.votes[key].t < v.t then current.votes[key] = v end
+    end
+    for id, k in pairs(old.kills) do
+        if not current.kills[id] or current.kills[id].v > k.v then current.kills[id] = k end
+    end
+    for _, flag in ipairs(old.flags) do current.flags[#current.flags + 1] = flag end
+    table.sort(current.flags, function(x, y) return (x.at or 0) < (y.at or 0) end)
+    while #current.flags > KOS.FLAGS_KEPT do table.remove(current.flags, 1) end
+    return current
+end
+
+function KOS:RecoverAuthorshipOwners(guildKey)
+    local authored = self.db.authored or {}
+    local owners = {}
+    for owner in pairs(authored) do owners[#owners + 1] = owner end
+    for _, owner in ipairs(owners) do
+        local lists = authored[owner]
+        if owner:sub(-1) == "-" and lists[guildKey] then
+            local key = self:Canonical(owner)
+            if key and key ~= owner and key:sub(-1) ~= "-" then
+                -- Only move the ledger for the guild we have resolved.
+                local current = authored[key] or {}
+                current[guildKey] = mergeAuthorship(current[guildKey], lists[guildKey])
+                authored[key] = current
+                lists[guildKey] = nil
+            end
+        end
+    end
+end
+
 -- Repair the pre-fix split once for the current guild. A second realm
 -- with the same guild name makes the blank list ambiguous, so keep it.
 function KOS:RecoverBlankGuildList()
@@ -1475,10 +1509,13 @@ function KOS:RecoverBlankGuildList()
     if not guild then return end
     local blank = guild .. "-"
     local source = self.db.lists[blank]
-    if not source then return true end
     local known, ambiguous = knownGuildKey(self.db, guild)
     local resolved = self:ListKey()
     if ambiguous or not resolved or (known and known ~= resolved) then return end
+    if not source then
+        self:RecoverAuthorshipOwners(resolved)
+        return true
+    end
     if self:ForeverNames() then self:RepairNames(source) end
     self:TidyLedgers()
 
@@ -1507,23 +1544,10 @@ function KOS:RecoverBlankGuildList()
 
     -- Carry over the original authorship records without signing recovered items.
     for _, lists in pairs(self.db.authored or {}) do
-        local old, current = lists[blank], lists[resolved]
-        if old and not current then
-            lists[resolved] = old
-        elseif old then
-            current.since = math.min(current.since, old.since)
-            for key, v in pairs(old.votes) do
-                if not current.votes[key] or current.votes[key].t < v.t then current.votes[key] = v end
-            end
-            for id, k in pairs(old.kills) do
-                if not current.kills[id] or current.kills[id].v > k.v then current.kills[id] = k end
-            end
-            for _, flag in ipairs(old.flags) do current.flags[#current.flags + 1] = flag end
-            table.sort(current.flags, function(x, y) return (x.at or 0) < (y.at or 0) end)
-            while #current.flags > self.FLAGS_KEPT do table.remove(current.flags, 1) end
-        end
+        if lists[blank] then lists[resolved] = mergeAuthorship(lists[resolved], lists[blank]) end
         lists[blank] = nil
     end
+    self:RecoverAuthorshipOwners(resolved)
 
     local feeds = self.db.feeds
     if feeds and feeds[blank] then

@@ -1,6 +1,9 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.10.3", {
+        "|cffffd100Clearer sync warnings:|r Utu reconnects marks and claims to your own authorship records after recovering a split guild list. Warnings now describe unverified sync data.",
+    } },
     { "0.10.2", {
         "|cffffd100Restore missing Wanted entries:|r if Forever left the realm blank and Utu started a second list for your guild, Utu rejoins it with your existing list when the realm is clear.",
     } },
