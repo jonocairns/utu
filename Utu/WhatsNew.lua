@@ -1,6 +1,9 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.10.2", {
+        "|cffffd100Restore missing Wanted entries:|r if Forever left the realm blank and Utu started a second list for your guild, Utu rejoins it with your existing list when the realm is clear.",
+    } },
     { "0.10.1", {
         "|cffffd100Review attackers:|r the death prompt starts folded with quick |cffffd100Skip|r and |cffffd100Mark|r actions. Open |cffffd100Review|r to choose who to mark or hate, or add one optional note for your guild. You have five seconds to undo before your choices apply.",
         "|cffffd100Nearby players:|r if the death recap does not show who damaged you, Utu offers private Hate and individual manual marks. These choices leave the guild's death reports alone.",

@@ -2454,6 +2454,63 @@ local function clickDeath(widget)
     widget.scripts.OnClick(widget)
 end
 
+test("forever: a blank realm restores the saved guild list and merges the split once", function()
+    H.forever = true
+    local guild = H.guild.name
+    local key, blank = guild .. "-Forever", guild .. "-"
+    local now = math.floor(H.serverTime)
+    local restored = "restored-forever"
+    local function target(name, t, deleted)
+        return { n = name, votes = { ["alice-forever"] = { by = "Alice-Forever", t = t, note = "", del = deleted } } }
+    end
+    local d = { killer = "Restored-Forever", victim = "Alice-Forever", zone = "Durotar", t = now, note = "Graveyard" }
+    local deadId = "alice-forever|restored-forever|" .. now
+    local claim = { target = "Restored-Forever", by = "Alice-Forever", t = now, v = 30 }
+    local claimId = deadId
+    local db = { lists = {
+        [key] = { targets = { ["original-forever"] = target("Original-Forever", now - 3),
+            ["removed-forever"] = target("Removed-Forever", now - 2) }, kills = { [claimId] = claim } },
+        [blank] = { targets = { [restored] = target("Restored-", now),
+            ["removed-forever"] = target("Removed-Forever", now, true) },
+            deaths = { [deadId] = d }, struck = { [claimId] = { by = "Alice-Forever", t = now, kt = now } } },
+    }, charGuild = { ["Alice-Forever"] = blank }, authored = { ["alice-forever"] = {
+        [blank] = { since = now - 1, votes = { [restored] = { n = "Restored-", t = now, note = "" } } },
+    } } }
+    local a = H.newClient("Alice", { db = db, normalizedRealm = "", realm = "", guildRealm = "", guildInfoLate = true })
+    assert(a.db.lists[blank], "data survives while guild info is late")
+    a.guildInfoLate = false
+    H.fire(a, "PLAYER_GUILD_UPDATE")
+    eq(a.KOS:ListKey(), key)
+    eq(a.KOS:MyRealm(), "Forever")
+    assert(T_(a, "Original").on and T_(a, "Restored").on)
+    eq(T_(a, "Removed").on, false, "newer removal wins")
+    eq(a.KOS:Deaths()[deadId].note, "Graveyard")
+    eq(a.KOS:Kills()[claimId], nil, "struck claim stays removed")
+    eq(a.KOS:Ledger().votes[restored].t, now)
+    eq(a.db.lists[blank], nil, "split merged once")
+    a.KOS:InitDB()
+    eq(#a.KOS:GanksBy(restored), 1, "idempotent")
+    noErrors(a)
+end)
+
+test("forever: an unknown or ambiguous realm never selects a blank guild list", function()
+    H.forever = true
+    local blank = H.guild.name .. "-"
+    local options = { normalizedRealm = "", realm = "", guildRealm = "",
+        db = { lists = { [blank] = {} } } }
+    local a = H.newClient("Alice", options)
+    eq(a.KOS:ListKey(), nil)
+    eq(a.KOS:Mark("Peeper", ""), nil)
+    assert(not next(a.db.lists[blank].targets), "unresolved list not written")
+    local b = H.newClient("Bob", { normalizedRealm = "", realm = "Forever", guildRealm = "" })
+    eq(b.KOS:ListKey(), H.guild.name .. "-Forever", "raw realm is used if normalized realm is empty")
+    local c = H.newClient("Carol", { normalizedRealm = "", realm = "", guildRealm = "",
+        db = { lists = { [blank] = {}, [blank .. "Realm1"] = {}, [blank .. "Realm2"] = {} } } })
+    eq(c.KOS:ListKey(), nil)
+    assert(c.db.lists[blank], "ambiguous data is kept for later recovery")
+    noErrors(a); noErrors(b); noErrors(c)
+end)
+
 test("forever: the collapsed death recap applies marks, one encounter note, and selected private Hate", function()
     H.forever = true
     local a, b = H.newClient("Alice"), H.newClient("Bob")

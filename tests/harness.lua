@@ -214,6 +214,8 @@ function H.newClient(name, opts)
 
     local env = setmetatable({}, { __index = base })
     if opts.bit then env.bit = opts.bit end
+    if opts.normalizedRealm ~= nil then env.GetNormalizedRealmName = function() return opts.normalizedRealm end end
+    if opts.realm ~= nil then env.GetRealmName = function() return opts.realm end end
     env._G = env
     c.env = env
 
@@ -229,7 +231,7 @@ function H.newClient(name, opts)
     env.IsInGuild = function() return c.inGuild end
     env.GetGuildInfo = function(unit)
         if unit == "player" then
-            if c.inGuild and not c.guildInfoLate then return H.guild.name, "Rank" .. c.rank, c.rank, nil end
+            if c.inGuild and not c.guildInfoLate then return H.guild.name, "Rank" .. c.rank, c.rank, opts.guildRealm end
             return nil
         end
         local u = c.units[unit]

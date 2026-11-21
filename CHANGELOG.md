@@ -5,6 +5,9 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.10.2
+- **Restore missing Wanted entries:** if Forever left the realm blank and Utu started a second list for your guild, Utu rejoins it with your existing list when the realm is clear.
+
 ## 0.10.1
 - **Review attackers:** the death prompt starts folded with quick **Skip** and **Mark** actions. Open **Review** to choose who to mark or hate, or add one optional note for your guild. You have five seconds to undo before your choices apply.
 - **Nearby players:** if the death recap does not show who damaged you, Utu offers private Hate and individual manual marks. These choices leave the guild's death reports alone.

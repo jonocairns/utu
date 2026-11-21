@@ -496,11 +496,30 @@ end
 -- full "Name-Realm" so they mean the same thing to every guildie.
 ------------------------------------------------------------------------
 
+-- A guild name alone is enough to recover a cached realm only when the
+-- saved data has a single realm-qualified list for that name.
+local function knownGuildKey(db, guild)
+    if not db or not guild then return nil end
+    local prefix, found = guild .. "-", nil
+    for key in pairs(db.lists) do
+        if key:sub(1, #prefix) == prefix and key:sub(#prefix + 1):match("^[^%-]+$") then
+            if found then return nil, true end
+            found = key
+        end
+    end
+    return found
+end
+
 local myRealm
 function KOS:MyRealm()
     if not myRealm or myRealm == "" then
-        myRealm = (GetNormalizedRealmName and GetNormalizedRealmName())
-            or (GetRealmName() or ""):gsub("[%s%-']", "")
+        myRealm = GetNormalizedRealmName and GetNormalizedRealmName() or ""
+        if myRealm == "" then myRealm = (GetRealmName() or ""):gsub("[%s%-']", "") end
+        if myRealm == "" and self.db and IsInGuild() then
+            local guild, _, _, realm = GetGuildInfo("player")
+            local key = knownGuildKey(self.db, guild)
+            myRealm = (realm and realm ~= "" and realm) or (key and key:sub(#guild + 2)) or ""
+        end
     end
     return myRealm
 end
@@ -525,7 +544,8 @@ function KOS:JoinSpacedName(n, r)
     if not (n and r and r ~= "" and self:ForeverNames()) then return n, r end
     local rr = strtrim(r)
     if rr == "" or rr:find("[%d%p%c]") then return n, r end
-    if rr:gsub("%s", ""):lower() == (self:MyRealm() or ""):lower() then return n, r end
+    local realm = self:MyRealm():lower()
+    if realm == "" or rr:gsub("%s", ""):lower() == realm then return n, r end
     return strtrim(n) .. " " .. rr, nil
 end
 
@@ -572,14 +592,16 @@ function KOS:UnitFull(unit)
     return info and info.full
 end
 
-local myName, myKey
+local myName, myKey, myNameRealm
 function KOS:MyName()
-    if not myName then
+    local realm = self:MyRealm()
+    if not myName or myNameRealm ~= realm then
         -- Forever splits two-word names for the player too: UnitName gives
         -- "Yeh", "Neh". Pass both parts so Canonical puts them back together.
         local n, r = UnitName("player")
         if type(n) == "string" and type(r) == "string" and r ~= "" then n = n .. "-" .. r end
         myKey, myName = self:Canonical(n)
+        myNameRealm = realm
     end
     return myName
 end
@@ -740,6 +762,8 @@ end
 --   id = victimKey|killerKey|t. Raises the killer's bounty; enables revenge.
 ------------------------------------------------------------------------
 
+local recoverGuildOnUpdate
+
 function KOS:InitDB()
     local upgrading = UtuDB ~= nil
     UtuDB = UtuDB or {}
@@ -798,6 +822,12 @@ function KOS:InitDB()
         end
     end
     self:TidyLedgers()
+    if not self:RecoverBlankGuildList() then
+        -- Guild info may only become available after the SavedVariables load.
+        recoverGuildOnUpdate = function()
+            if self:RecoverBlankGuildList() then recoverGuildOnUpdate = nil end
+        end
+    end
     self:TidyGrudges() -- personal: hated players, my deaths to each player
     -- make the signing key now, so it's saved even if nothing is signed
     -- this session (a crash in the session that made it would lose it)
@@ -919,13 +949,27 @@ function KOS:ListKey()
         listKey = "_personal"
         return listKey
     end
+    local saved = self.db.charGuild[me]
     local g, _, _, realm = GetGuildInfo("player")
     if g then
-        listKey = g .. "-" .. ((realm and realm ~= "") and realm or self:MyRealm())
-        self.db.charGuild[me] = listKey
+        local prefix = g .. "-"
+        if realm and realm ~= "" then
+            listKey = prefix .. realm
+        elseif saved and #saved > #prefix and saved:sub(1, #prefix) == prefix then
+            listKey = saved
+        else
+            local known, ambiguous = knownGuildKey(self.db, g)
+            listKey = known
+            if not listKey and not ambiguous then
+                local fallback = self:MyRealm()
+                if fallback ~= "" then listKey = prefix .. fallback end
+            end
+        end
+        if listKey then self.db.charGuild[me] = listKey end
         return listKey
     end
-    return self.db.charGuild[me] -- guild info not loaded yet; don't cache
+    -- Guild info has not loaded. A saved blank-realm key is unusable.
+    return saved and saved:sub(-1) ~= "-" and saved or nil
 end
 
 function KOS:IsGuildList()
@@ -1420,6 +1464,81 @@ function KOS:MergeDeath(d)
     local T = key and self:GetTarget(key, full, true)
     if T then self:Recalc(T); self:InvalidateIndex() end
     self:ClearDistress(self:Canonical(d.killer), d.victim) -- too late to rescue; it's revenge now
+    return true
+end
+
+-- Repair the pre-fix split once for the current guild. A second realm
+-- with the same guild name makes the blank list ambiguous, so keep it.
+function KOS:RecoverBlankGuildList()
+    if not IsInGuild() then return true end
+    local guild = GetGuildInfo("player")
+    if not guild then return end
+    local blank = guild .. "-"
+    local source = self.db.lists[blank]
+    if not source then return true end
+    local known, ambiguous = knownGuildKey(self.db, guild)
+    local resolved = self:ListKey()
+    if ambiguous or not resolved or (known and known ~= resolved) then return end
+    if self:ForeverNames() then self:RepairNames(source) end
+    self:TidyLedgers()
+
+    for key, T in pairs(source.targets) do
+        local current = self:GetTarget(key, T.n, true)
+        if T.cleared then self:MergeClear(key, T.n, T.cleared) end
+        for _, v in pairs(T.votes) do
+            -- The old tag authenticates the blank key, not its destination.
+            self:MergeVote(key, T.n, { by = v.by, t = v.t, del = v.del, note = v.note }, T.guid, T.class)
+        end
+        current.guid, current.class = current.guid or T.guid, current.class or T.class
+        if T.guild and T.guildT then self:MergeGuild(key, T.n, T.guild, T.guildT) end
+        if T.seen and T.seen > (current.seen or 0) then
+            current.seen, current.seenBy, current.zone = T.seen, T.seenBy, T.zone
+        end
+    end
+    for _, d in pairs(source.deaths) do self:MergeDeath(d) end
+    for id, x in pairs(source.struck) do self:MergeStrike(id, x) end
+    for _, k in pairs(source.kills) do
+        local copy = {}
+        for field, value in pairs(k) do copy[field] = value end
+        copy.sig = nil
+        self:MergeKill(copy)
+    end
+    if source.season then self:MergeSeason(source.season) end
+
+    -- Carry over the original authorship records without signing recovered items.
+    for _, lists in pairs(self.db.authored or {}) do
+        local old, current = lists[blank], lists[resolved]
+        if old and not current then
+            lists[resolved] = old
+        elseif old then
+            current.since = math.min(current.since, old.since)
+            for key, v in pairs(old.votes) do
+                if not current.votes[key] or current.votes[key].t < v.t then current.votes[key] = v end
+            end
+            for id, k in pairs(old.kills) do
+                if not current.kills[id] or current.kills[id].v > k.v then current.kills[id] = k end
+            end
+            for _, flag in ipairs(old.flags) do current.flags[#current.flags + 1] = flag end
+            table.sort(current.flags, function(x, y) return (x.at or 0) < (y.at or 0) end)
+            while #current.flags > self.FLAGS_KEPT do table.remove(current.flags, 1) end
+        end
+        lists[blank] = nil
+    end
+
+    local feeds = self.db.feeds
+    if feeds and feeds[blank] then
+        local current = self:Feed()
+        for _, entry in ipairs(feeds[blank]) do current[#current + 1] = entry end
+        table.sort(current, function(x, y) return (x.t or 0) > (y.t or 0) end)
+        for i = #current, 151, -1 do current[i] = nil end
+        feeds[blank] = nil
+    end
+    for character, key in pairs(self.db.charGuild) do
+        if key == blank then self.db.charGuild[character] = resolved end
+    end
+    self.db.lists[blank] = nil
+    self:RecalcAll()
+    self:Changed()
     return true
 end
 
@@ -3285,6 +3404,7 @@ end)
 KOS:On("GUILD_ROSTER_UPDATE", function()
     local before = KOS:ListKey()
     KOS:InvalidateListKey()
+    if recoverGuildOnUpdate then recoverGuildOnUpdate() end
     KOS:RefreshRoster()
     if KOS:ListKey() ~= before then KOS:Changed() end
 end)
@@ -3363,6 +3483,7 @@ end)
 
 KOS:On("PLAYER_GUILD_UPDATE", function()
     KOS:InvalidateListKey()
+    if recoverGuildOnUpdate then recoverGuildOnUpdate() end
     KOS:ApplyNameFix()
     KOS:RequestRoster()
     KOS:Changed()
