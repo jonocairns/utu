@@ -2,6 +2,7 @@
 local _, ns = ...
 ns.KOS.CHANGES = {
     { "0.10.3", {
+        "|cffffd100Apply closes the death prompt:|r your five-second Undo remains available in the smaller receipt.",
         "|cffffd100Clearer sync warnings:|r Utu reconnects marks and claims to your own authorship records after recovering a split guild list. Warnings now describe unverified sync data.",
     } },
     { "0.10.2", {

@@ -516,7 +516,7 @@ local function stageDeaths(session, manual)
         note = session.guild and not manual and KOS.CleanText(deathPrompt.note:GetText(), KOS.ENCOUNTER_NOTE_MAX) or nil }
     queuedDeaths[#queuedDeaths + 1] = batch
     C_Timer.After(DEATH_UNDO, function() commitDeaths(batch) end)
-    deathPrompt.note:ClearFocus()
+    if not manual then closeDeathPrompt() else deathPrompt.note:ClearFocus() end
     redrawDeath()
 end
 
