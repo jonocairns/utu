@@ -91,64 +91,196 @@ end
 ------------------------------------------------------------------------
 -- Spotted tracker: KoS players seen in the last few minutes (by you or
 -- guildies). Pops up on a sighting, hides itself when the list empties.
+-- Two lines per row: name, bounty and age, then place and spotter.
+-- Sightings in your subzone sort first and still show while snoozed.
 ------------------------------------------------------------------------
 
 local TRACK_SECONDS = 300
-local snoozeUntil = 0 -- closing the tracker snoozes it
-local MAX_ROWS = 8
+local SNOOZE_SECONDS = 900
+local MAX_ROWS = 4
+local WIDTH, HEADER_H, ROW_H, FOOTER_H = 280, 20, 36, 18
+local NAME_MAX = 150
+local snoozeUntil = 0
 local recent = {} -- key -> { T, at, by, zone }
 local tracker
 
+-- Where a sighting is relative to you: 2 = your subzone, 1 = your zone,
+-- 0 = elsewhere.
+function KOS:Proximity(zone)
+    if not zone or zone == "" then return 0 end
+    local here = KOS.ZoneString and KOS.ZoneString() or (GetRealZoneText() or "")
+    if here ~= "" and zone == here and zone ~= (GetRealZoneText() or "") then return 2 end
+    return self:InMyZone(zone) and 1 or 0
+end
+
+-- "now" for the first 30 seconds, then whole minutes.
+function KOS.TrackerAge(seconds)
+    if seconds < 30 then return "now" end
+    return math.max(1, math.floor(seconds / 60)) .. "m"
+end
+
+function KOS:TrackerSnoozed() return GetTime() < snoozeUntil end
+
+-- Live sightings in display order. While snoozed, only your subzone.
+function KOS:TrackerRows()
+    local now, snoozed, list = GetTime(), self:TrackerSnoozed(), {}
+    for k, r in pairs(recent) do
+        if now - r.at > TRACK_SECONDS then
+            recent[k] = nil
+        else
+            r.near = self:Proximity(r.zone)
+            if not snoozed or r.near == 2 then list[#list + 1] = r end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.near ~= b.near then return a.near > b.near end
+        return a.at > b.at
+    end)
+    return list
+end
+
+-- Left-click on the close button: clear what's there; new sightings reopen it.
+function KOS:ClearTracker()
+    wipe(recent)
+    if tracker then tracker:Hide() end
+end
+
+-- Right-click: snooze. Sightings in your subzone still break through.
+function KOS:SnoozeTracker()
+    snoozeUntil = GetTime() + SNOOZE_SECONDS
+    self:Print("Spotted tracker snoozed for 15 min. Sightings in your subzone still show.")
+    self:RefreshTracker()
+end
+
+-- Tier colour lifted toward white until it reads on the dark frame
+-- (Dormant grey, Most Wanted blue).
+local function legible(r, g, b)
+    local lum = 0.3 * r + 0.59 * g + 0.11 * b
+    if lum >= 0.5 then return r, g, b end
+    local t = (0.5 - lum) / (1 - lum)
+    return r + (1 - r) * t, g + (1 - g) * t, b + (1 - b) * t
+end
+
+local function placeText(r)
+    local zone, sub = (r.zone or ""):match("^(.-) %- (.+)$")
+    zone = zone or r.zone or ""
+    if r.near == 2 then return "|cffff5040" .. (sub or zone) .. "|r" end
+    if r.near == 1 then return sub or zone end
+    return "|cffa0a0a0" .. zone .. "|r"
+end
+
+local function buildRow(i)
+    local row = CreateFrame("Frame", nil, tracker)
+    row:SetSize(WIDTH - 2, ROW_H)
+    row:SetPoint("TOPLEFT", 1, -(HEADER_H + (i - 1) * ROW_H))
+    row.tint = row:CreateTexture(nil, "BACKGROUND")
+    row.tint:SetAllPoints()
+    row.tint:SetColorTexture(1, 0.16, 0.12, 0.16)
+    row.flash = row:CreateTexture(nil, "BORDER")
+    row.flash:SetAllPoints()
+    row.flash:SetBlendMode("ADD")
+    row.flash:SetAlpha(0)
+    row.line = row:CreateTexture(nil, "BORDER")
+    row.line:SetPoint("TOPLEFT"); row.line:SetPoint("TOPRIGHT")
+    row.line:SetHeight(1)
+    row.line:SetColorTexture(1, 1, 1, 0.04)
+    row.bar = row:CreateTexture(nil, "ARTWORK")
+    row.bar:SetPoint("TOPLEFT"); row.bar:SetPoint("BOTTOMLEFT")
+    row.bar:SetWidth(3)
+
+    row.age = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    row.age:SetPoint("TOPRIGHT", -8, -5)
+    row.age:SetWidth(34)
+    row.age:SetJustifyH("RIGHT")
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.name:SetPoint("TOPLEFT", 11, -4)
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+    row.tag = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.tag:SetPoint("BOTTOMLEFT", row.name, "BOTTOMRIGHT", 6, 1)
+    row.tag:SetJustifyH("LEFT")
+    row.tag:SetWordWrap(false)
+    row.place = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.place:SetPoint("TOPLEFT", 11, -20)
+    row.place:SetPoint("RIGHT", -8, 0)
+    row.place:SetJustifyH("LEFT")
+    row.place:SetWordWrap(false)
+    row:Hide()
+    return row
+end
+
 local function buildTracker()
     tracker = CreateFrame("Frame", "UtuTracker", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    tracker:SetSize(280, 40)
+    tracker:SetSize(WIDTH, HEADER_H + ROW_H)
     local pos = KOS.S.trackerPos
     if pos then tracker:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3])
     else tracker:SetPoint("RIGHT", UIParent, "RIGHT", -220, 120) end
     if tracker.SetBackdrop then
         tracker:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
         })
-        tracker:SetBackdropColor(0.05, 0, 0, 0.8)
-        tracker:SetBackdropBorderColor(0.8, 0.1, 0.1)
+        tracker:SetBackdropColor(0, 0, 0, 0.62)
+        tracker:SetBackdropBorderColor(0, 0, 0, 1)
     end
     tracker:SetMovable(true)
-    tracker:EnableMouse(true)
     tracker:SetClampedToScreen(true)
-    tracker:RegisterForDrag("LeftButton")
-    tracker:SetScript("OnDragStart", tracker.StartMoving)
-    tracker:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, _, x, y = self:GetPoint()
+    tracker:EnableMouse(false) -- rows click through to the world; drag by the header
+
+    local header = CreateFrame("Frame", nil, tracker)
+    header:SetPoint("TOPLEFT", 1, -1); header:SetPoint("TOPRIGHT", -1, -1)
+    header:SetHeight(HEADER_H - 1)
+    header:EnableMouse(true)
+    header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart", function() tracker:StartMoving() end)
+    header:SetScript("OnDragStop", function()
+        tracker:StopMovingOrSizing()
+        local point, _, _, x, y = tracker:GetPoint()
         KOS.S.trackerPos = { point, x, y }
     end)
+    local hbg = header:CreateTexture(nil, "BACKGROUND")
+    hbg:SetAllPoints()
+    hbg:SetColorTexture(1, 1, 1, 0.05)
+    local icon = header:CreateTexture(nil, "ARTWORK")
+    icon:SetTexture(SKULL)
+    icon:SetSize(12, 12)
+    icon:SetPoint("LEFT", 7, 0)
+    icon:SetVertexColor(0.85, 0.75, 0.5)
+    tracker.title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tracker.title:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+    tracker.title:SetWidth(WIDTH - 60)
+    tracker.title:SetJustifyH("LEFT")
+    tracker.title:SetWordWrap(false)
 
-    tracker.title = tracker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tracker.title:SetPoint("TOPLEFT", 8, -7)
-    tracker.title:SetText("|T" .. SKULL .. ":12|t Utu - spotted")
-
-    local close = CreateFrame("Button", nil, tracker, "UIPanelCloseButton")
+    local close = CreateFrame("Button", nil, header, "UIPanelCloseButton")
     close:SetSize(20, 20)
-    close:SetPoint("TOPRIGHT", 1, 1)
-    close:SetScript("OnClick", function()
-        snoozeUntil = GetTime() + 900 -- closing snoozes it for 15 minutes
-        tracker:Hide()
+    close:SetPoint("RIGHT", 1, 0)
+    close:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    close:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then KOS:SnoozeTracker() else KOS:ClearTracker() end
     end)
+    close:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("|cffffd100Left-click|r clear these", 1, 1, 1)
+        GameTooltip:AddLine("|cffffd100Right-click|r snooze 15 min", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    close:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     tracker.rows = {}
-    for i = 1, MAX_ROWS do
-        local fs = tracker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("TOPLEFT", 8, -8 - i * 14)
-        fs:SetPoint("RIGHT", -8, 0)
-        fs:SetJustifyH("LEFT")
-        fs:SetWordWrap(false)
-        tracker.rows[i] = fs
-    end
+    for i = 1, MAX_ROWS do tracker.rows[i] = buildRow(i) end
+    tracker.footer = tracker:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    tracker.footer:SetPoint("BOTTOMLEFT", 12, 4)
+    tracker.footer:SetPoint("RIGHT", -8, 0)
+    tracker.footer:SetJustifyH("LEFT")
+    tracker.footer:SetWordWrap(false)
 
     local acc = 0
     tracker:SetScript("OnUpdate", function(_, dt)
+        local now = GetTime()
+        for _, row in ipairs(tracker.rows) do -- half-second flash on a new sighting
+            local e = row:IsShown() and row.at and (now - row.at)
+            row.flash:SetAlpha((e and e < 0.5) and (0.5 - e) or 0)
+        end
         acc = acc + dt
         if acc >= 1 then acc = 0; KOS:RefreshTracker() end
     end)
@@ -163,32 +295,49 @@ function KOS:TrackSighting(T, by, zone)
 end
 
 function KOS:RefreshTracker()
-    local now = GetTime()
-    local list = {}
-    for k, r in pairs(recent) do
-        if now - r.at > TRACK_SECONDS then recent[k] = nil else list[#list + 1] = r end
-    end
-    if not self.S.tracker or #list == 0 or GetTime() < snoozeUntil or IsInRaid() or not self:InWorld() then
+    local list = self:TrackerRows()
+    if not self.S.tracker or #list == 0 or IsInRaid() or not self:InWorld() then
         if tracker then tracker:Hide() end
         return
     end
     if not tracker then buildTracker() end
-    table.sort(list, function(a, b) return a.at > b.at end)
-    for i = 1, MAX_ROWS do
-        local fs, r = tracker.rows[i], list[i]
-        if r then
-            local cr, cg, cb = tierRGB(r.T)
-            local w = r.T.virtual and "" or (" Lv " .. KOS:LevelOf(r.T))
-            local ago = math.floor(now - r.at)
-            local by = (r.by ~= self:MyName()) and (" |cff888888(" .. self:Display(r.by) .. ")|r") or ""
-            fs:SetText(string.format("|cff%02x%02x%02x%s%s|r  |cffaaaaaa%ds|r  %s%s",
-                cr * 255, cg * 255, cb * 255, self:Display(r.T.n), w, ago, r.zone or "", by))
-            fs:Show()
+    local now, me = GetTime(), self:MyName()
+    tracker.title:SetText("Spotted |cff8f8f8f" .. #list .. "|r"
+        .. (self:TrackerSnoozed() and "  |cff8f8f8fsnoozed|r" or ""))
+    local shown = math.min(#list, MAX_ROWS)
+    for i, row in ipairs(tracker.rows) do
+        local r = list[i]
+        if i <= shown then
+            local cr, cg, cb = legible(tierRGB(r.T))
+            local age = now - r.at
+            row.at = r.at
+            row.bar:SetColorTexture(cr, cg, cb, 1)
+            row.flash:SetColorTexture(cr, cg, cb, 0.5)
+            row.tint:SetShown(r.near == 2)
+            row.name:SetWidth(NAME_MAX)
+            row.name:SetText(self:Display(r.T.n))
+            local nameW = math.min(row.name:GetStringWidth() + 2, NAME_MAX)
+            row.name:SetWidth(nameW)
+            row.tag:SetWidth(WIDTH - 11 - nameW - 6 - 48) -- up to the age column
+            local label = r.T.virtual and ("KoS guild <" .. (r.T.guild or "?") .. ">")
+                or (self.BountyBand(self:LevelOf(r.T)).name .. " " .. self:LevelOf(r.T))
+            row.tag:SetText(string.format("|cff%02x%02x%02x%s|r", cr * 255, cg * 255, cb * 255, label))
+            row.age:SetText(self.TrackerAge(age))
+            local by = (r.by and r.by ~= me) and (" |cff8a8a8a· " .. self:Display(r.by) .. "|r") or ""
+            row.place:SetText(placeText(r) .. by)
+            local alpha = (r.near == 0) and 0.6 or 1
+            if age > 120 then alpha = alpha * 0.72 end
+            row:SetAlpha(alpha)
+            row:Show()
         else
-            fs:Hide()
+            row.at = nil
+            row:Hide()
         end
     end
-    tracker:SetHeight(16 + math.min(#list, MAX_ROWS) * 14 + 10)
+    local extra = #list - shown
+    tracker.footer:SetText(extra > 0 and ("+" .. extra .. " more") or "")
+    tracker.footer:SetShown(extra > 0)
+    tracker:SetHeight(HEADER_H + shown * ROW_H + (extra > 0 and FOOTER_H or 0) + 2)
     tracker:Show()
 end
 

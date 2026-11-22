@@ -902,6 +902,65 @@ test("tracker copes with raids", function()
     a.KOS:TrackSighting(T, "Bob-Forever", "Elwynn")
 end)
 
+local function trackerClient()
+    local a = H.newClient("Alice")
+    a.zone, a.subzone = "Tanaris", "Steamwheedle Port"
+    H.advance(20)
+    for _, n in ipairs({ "Farguy", "Zoneguy", "Hereguy" }) do a.KOS:Mark(n, "") end
+    return a
+end
+
+test("tracker sorts your subzone first, then your zone, then elsewhere", function()
+    local a = trackerClient()
+    a.KOS:TrackSighting(T_(a, "Hereguy"), "Bob-Forever", "Tanaris - Steamwheedle Port")
+    H.advance(5)
+    a.KOS:TrackSighting(T_(a, "Zoneguy"), "Bob-Forever", "Tanaris - Gadgetzan")
+    H.advance(5)
+    a.KOS:TrackSighting(T_(a, "Farguy"), "Bob-Forever", "Thousand Needles - Shimmering Flats")
+    local rows = a.KOS:TrackerRows()
+    eq(#rows, 3)
+    eq(rows[1].T.n, "Hereguy-Forever", "subzone first though oldest")
+    eq(rows[1].near, 2)
+    eq(rows[2].near, 1)
+    eq(rows[3].near, 0, "elsewhere last though newest")
+    a.subzone = "Gadgetzan"
+    eq(a.KOS:TrackerRows()[1].T.n, "Zoneguy-Forever", "follows you as you move")
+end)
+
+test("tracker ages read now, then whole minutes, and rows expire after 5 minutes", function()
+    local age = H.newClient("Alice").KOS.TrackerAge
+    eq(age(0), "now"); eq(age(29), "now"); eq(age(30), "1m"); eq(age(59), "1m"); eq(age(125), "2m")
+    local a = trackerClient()
+    a.KOS:TrackSighting(T_(a, "Farguy"), "Bob-Forever", "Feralas")
+    for _, n in ipairs({ "Extraa", "Extrab", "Extrac", "Extrad", "Extrae", "Extraf" }) do
+        a.KOS:Mark(n, ""); a.KOS:TrackSighting(T_(a, n), "Bob-Forever", "Feralas")
+    end
+    a.KOS:RefreshTracker() -- more rows than fit: footer path
+    eq(#a.KOS:TrackerRows(), 7)
+    H.advance(301)
+    eq(#a.KOS:TrackerRows(), 0)
+end)
+
+test("tracker close: left-click clears, right-click snoozes but your subzone breaks through", function()
+    local a = trackerClient()
+    a.KOS:TrackSighting(T_(a, "Farguy"), "Bob-Forever", "Feralas")
+    a.KOS:ClearTracker()
+    eq(#a.KOS:TrackerRows(), 0, "cleared")
+    a.KOS:TrackSighting(T_(a, "Farguy"), "Bob-Forever", "Feralas")
+    eq(#a.KOS:TrackerRows(), 1, "a new sighting reopens it")
+
+    a.KOS:SnoozeTracker()
+    assert(H.chatContains(a, "snoozed for 15 min"), "says it's snoozed")
+    a.KOS:TrackSighting(T_(a, "Zoneguy"), "Bob-Forever", "Tanaris - Gadgetzan")
+    eq(#a.KOS:TrackerRows(), 0, "elsewhere and same-zone hidden while snoozed")
+    a.KOS:TrackSighting(T_(a, "Hereguy"), "Bob-Forever", "Tanaris - Steamwheedle Port")
+    local rows = a.KOS:TrackerRows()
+    eq(#rows, 1); eq(rows[1].T.n, "Hereguy-Forever", "your subzone breaks through")
+    H.advance(901)
+    a.KOS:TrackSighting(T_(a, "Farguy"), "Bob-Forever", "Feralas")
+    eq(#a.KOS:TrackerRows(), 1, "snooze over")
+end)
+
 test("officer rules are edited in the guild info, without clobbering it", function()
     H.guild.info = "Raid nights Tue/Thu"
     local off, pleb = H.newClient("Officer", { rank = 1 }), H.newClient("Pleb", { rank = 4 })

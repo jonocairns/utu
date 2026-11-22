@@ -1,6 +1,9 @@
 -- Generated from CHANGELOG.md by build.sh; edit that instead.
 local _, ns = ...
 ns.KOS.CHANGES = {
+    { "0.10.4", {
+        "|cffffd100Spotted tracker redesign:|r each sighting is now two lines, name and bounty, then place and who saw them. Sightings in your subzone are listed first in red. Left-click the ✕ to clear the list, right-click to snooze it for 15 minutes. Sightings in your subzone still show while snoozed.",
+    } },
     { "0.10.3", {
         "|cffffd100Apply closes the death prompt:|r your five-second Undo remains available in the smaller receipt.",
         "|cffffd100Clearer sync warnings:|r Utu reconnects marks and claims to your own authorship records after recovering a split guild list. Warnings now describe unverified sync data.",

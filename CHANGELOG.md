@@ -5,6 +5,9 @@ Newest first. Each `## version` section becomes that version's GitHub release no
 bullets short and written for players. `./build.sh` checks that the top section
 matches the version in `Utu/Utu.toc`.
 
+## 0.10.4
+- **Spotted tracker redesign:** each sighting is now two lines, name and bounty, then place and who saw them. Sightings in your subzone are listed first in red. Left-click the ✕ to clear the list, right-click to snooze it for 15 minutes. Sightings in your subzone still show while snoozed.
+
 ## 0.10.3
 - **Apply closes the death prompt:** your five-second Undo remains available in the smaller receipt.
 - **Clearer sync warnings:** Utu reconnects marks and claims to your own authorship records after recovering a split guild list. Warnings now describe unverified sync data.
